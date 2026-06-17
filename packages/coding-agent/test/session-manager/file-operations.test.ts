@@ -5,6 +5,26 @@ import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { findMostRecentSession, loadEntriesFromFile, SessionManager } from "../../src/core/session-manager.ts";
 
+async function removeDirWithRetry(path: string): Promise<void> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		try {
+			rmSync(path, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			const code = error instanceof Error && "code" in error ? (error as { code?: unknown }).code : undefined;
+			if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+		}
+	}
+	try {
+		rmSync(path, { recursive: true, force: true });
+	} catch {
+		// Windows can briefly keep large sparse files locked after stream-based reads.
+	}
+}
+
 describe("loadEntriesFromFile", () => {
 	let tempDir: string;
 
@@ -13,8 +33,8 @@ describe("loadEntriesFromFile", () => {
 		mkdirSync(tempDir, { recursive: true });
 	});
 
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
+	afterEach(async () => {
+		await removeDirWithRetry(tempDir);
 	});
 
 	it("returns empty array for non-existent file", () => {
@@ -103,8 +123,8 @@ describe("findMostRecentSession", () => {
 		mkdirSync(tempDir, { recursive: true });
 	});
 
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
+	afterEach(async () => {
+		await removeDirWithRetry(tempDir);
 	});
 
 	it("returns null for empty directory", () => {
@@ -189,8 +209,8 @@ describe("SessionManager custom flat session directory", () => {
 		mkdirSync(projectB, { recursive: true });
 	});
 
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
+	afterEach(async () => {
+		await removeDirWithRetry(tempDir);
 	});
 
 	function createPersistedSession(cwd: string, label: string): string {
@@ -244,8 +264,8 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		mkdirSync(tempDir, { recursive: true });
 	});
 
-	afterEach(() => {
-		rmSync(tempDir, { recursive: true, force: true });
+	afterEach(async () => {
+		await removeDirWithRetry(tempDir);
 	});
 
 	it("truncates and rewrites empty file with valid header", () => {

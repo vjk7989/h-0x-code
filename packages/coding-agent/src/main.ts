@@ -26,7 +26,8 @@ import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
 import type { ExtensionFactory } from "./core/extensions/types.ts";
-import { findH0xAgent, H0xAgentError } from "./core/h0x-agents.ts";
+import { findH0xAgentOrDefault, type H0xAgent, H0xAgentError } from "./core/h0x-agents.ts";
+import { appendH0xMemoryToSystemPrompt } from "./core/h0x-memory.ts";
 import { applyHttpProxySettings, configureHttpDispatcher } from "./core/http-dispatcher.ts";
 import type { ModelRegistry } from "./core/model-registry.ts";
 import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/model-resolver.ts";
@@ -49,8 +50,14 @@ import { initTheme, stopThemeWatcher } from "./modes/interactive/theme/theme.ts"
 import {
 	handleAgentCommand,
 	handleConfigCommand,
+	handleGithubCommand,
+	handleInitCommand,
+	handleMcpCommand,
+	handleMcpIntegrationCommand,
+	handleMemoryCommand,
 	handlePackageCommand,
 	handleProviderCommand,
+	handleSetupCommand,
 } from "./package-manager-cli.ts";
 import { isLocalPath, normalizePath, resolvePath } from "./utils/paths.ts";
 import { cleanupWindowsSelfUpdateQuarantine } from "./utils/windows-self-update.ts";
@@ -129,23 +136,73 @@ function mapH0xAgentTools(tools: readonly string[]): string[] {
 	return Array.from(new Set(mapped));
 }
 
-export function resolveH0xRunAgentArgs(args: string[]): string[] {
-	if (args[0] !== "run" || !args[1]?.startsWith("@")) {
-		return args;
-	}
+const H0X_ROUTABLE_COMMANDS = new Set([
+	"agent",
+	"config",
+	"github",
+	"init",
+	"install",
+	"jira",
+	"linear",
+	"list",
+	"memory",
+	"mcp",
+	"notion",
+	"provider",
+	"remove",
+	"run",
+	"setup",
+	"uninstall",
+	"update",
+]);
 
-	const agentName = args[1].slice(1);
-	const task = args.slice(2);
-	if (!agentName || task.length === 0) {
-		throw new H0xAgentError("Usage: h0x run @<agent-name> <task>");
-	}
+function includesAny(text: string, words: readonly string[]): boolean {
+	return words.some((word) => text.includes(word));
+}
 
-	const agent = findH0xAgent(agentName);
-	if (!agent) {
-		throw new H0xAgentError(`Agent not found: ${agentName}`);
+export function classifyH0xAgentRoute(task: string): string {
+	const lower = task.toLowerCase();
+	if (includesAny(lower, ["vulnerability", "security", "secret", "secrets", "credential", "exploit"])) {
+		return "security";
 	}
+	if (includesAny(lower, ["docker", "deploy", "deployment", "ci", "pipeline", "release", "kubernetes"])) {
+		return "devops";
+	}
+	if (includesAny(lower, ["test", "tests", "testing", "spec", "qa", "coverage", "regression"])) {
+		return "qa";
+	}
+	if (includesAny(lower, ["architecture", "architect", "design system", "technical plan", "system design"])) {
+		return "architect";
+	}
+	if (includesAny(lower, ["ticket", "sprint", "planning", "roadmap", "acceptance criteria", "user story"])) {
+		return "product-manager";
+	}
+	if (includesAny(lower, ["auth", "api", "database", "db", "server", "endpoint", "migration", "schema"])) {
+		return "backend";
+	}
+	if (includesAny(lower, ["ui", "frontend", "react", "page", "screen", "component", "css", "layout"])) {
+		return "frontend";
+	}
+	return "fullstack";
+}
 
-	const resolvedArgs = ["--system-prompt", agent.systemPrompt];
+function shouldRoutePlainH0xPrompt(args: readonly string[]): boolean {
+	if (args.length === 0) {
+		return false;
+	}
+	if (args.some((arg) => arg.startsWith("-"))) {
+		return false;
+	}
+	const first = args[0];
+	if (!first || first.startsWith("@")) {
+		return false;
+	}
+	return !H0X_ROUTABLE_COMMANDS.has(first);
+}
+
+function resolveH0xAgentRuntimeArgs(agent: H0xAgent, task: readonly string[]): string[] {
+	const systemPrompt = appendH0xMemoryToSystemPrompt(agent.systemPrompt, task.join(" "));
+	const resolvedArgs = ["--system-prompt", systemPrompt];
 	if (agent.model) {
 		resolvedArgs.push("--model", agent.model);
 	}
@@ -155,6 +212,37 @@ export function resolveH0xRunAgentArgs(args: string[]): string[] {
 	}
 	resolvedArgs.push(...task);
 	return resolvedArgs;
+}
+
+export function resolveH0xRunAgentArgs(args: string[]): string[] {
+	const shortcutArgs = args[0]?.startsWith("@") ? ["run", ...args] : args;
+	if (shortcutArgs[0] !== "run" || !shortcutArgs[1]?.startsWith("@")) {
+		if (!shouldRoutePlainH0xPrompt(args)) {
+			return args;
+		}
+		const task = args.join(" ");
+		const agentName = classifyH0xAgentRoute(task);
+		const agent = findH0xAgentOrDefault(agentName);
+		if (!agent) {
+			throw new H0xAgentError(`Agent not found: ${agentName}`);
+		}
+		console.log(chalk.dim(`Selected agent: ${agent.name}`));
+		return resolveH0xAgentRuntimeArgs(agent, args);
+	}
+
+	const agentName = shortcutArgs[1].slice(1);
+	const task = shortcutArgs.slice(2);
+	if (!agentName || task.length === 0) {
+		throw new H0xAgentError("Usage: h0x @<agent-name> <task> or h0x run @<agent-name> <task>");
+	}
+
+	const agent = findH0xAgentOrDefault(agentName);
+	if (!agent) {
+		throw new H0xAgentError(`Agent not found: ${agentName}`);
+	}
+
+	console.log(chalk.dim(`Selected agent: ${agent.name}`));
+	return resolveH0xAgentRuntimeArgs(agent, task);
 }
 
 async function prepareInitialMessage(
@@ -538,6 +626,30 @@ export async function main(args: string[], options?: MainOptions) {
 	}
 
 	if (handleProviderCommand(args)) {
+		return;
+	}
+
+	if (handleMemoryCommand(args)) {
+		return;
+	}
+
+	if (handleInitCommand(args)) {
+		return;
+	}
+
+	if (handleSetupCommand(args)) {
+		return;
+	}
+
+	if (await handleMcpCommand(args)) {
+		return;
+	}
+
+	if (await handleGithubCommand(args)) {
+		return;
+	}
+
+	if (await handleMcpIntegrationCommand(args)) {
 		return;
 	}
 

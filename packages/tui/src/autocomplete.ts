@@ -488,6 +488,9 @@ export class CombinedAutocompleteProvider implements AutocompleteProvider {
 
 		// For forced extraction (Tab key), always return something
 		if (forceExtract) {
+			if (lastDelimiterIndex === -1 && /^\/[a-z][a-z0-9-]*$/.test(pathPrefix)) {
+				return null;
+			}
 			return pathPrefix;
 		}
 

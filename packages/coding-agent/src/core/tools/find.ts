@@ -171,7 +171,7 @@ export function createFindToolDefinition(
 								resultOutput += `\n\n[${notices.join(". ")}]`;
 							}
 							return {
-								content: [{ type: "text", text: resultOutput }],
+								content: [{ type: "text" as const, text: resultOutput }],
 								details: Object.keys(details).length > 0 ? details : undefined,
 							};
 						};
@@ -213,7 +213,9 @@ export function createFindToolDefinition(
 							return;
 						}
 
-						if (process.platform === "win32" && pattern.includes("/")) {
+						const needsWindowsPathGlobFallback =
+							process.platform === "win32" && pattern.includes("/") && !/^\*\*\/\*[^/]*$/.test(pattern);
+						if (needsWindowsPathGlobFallback) {
 							if (!(await ops.exists(searchPath))) {
 								settle(() => reject(new Error(`Path not found: ${searchPath}`)));
 								return;
