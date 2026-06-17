@@ -7,7 +7,7 @@ export interface H0xConfig {
 	defaultModel: string;
 	providers: H0xProvidersConfig;
 	agentsDir: string;
-	mcpServers: Record<string, unknown>;
+	mcpServers: H0xMcpServersConfig;
 	telemetry: boolean;
 }
 
@@ -23,6 +23,16 @@ export interface H0xProviderConfig {
 }
 
 export type H0xProvidersConfig = Partial<Record<H0xProviderName, H0xProviderConfig>>;
+
+export interface H0xMcpServerConfig {
+	command?: string;
+	args?: string[];
+	env?: Record<string, string>;
+	enabled?: boolean;
+	tools?: Record<string, string>;
+}
+
+export type H0xMcpServersConfig = Record<string, H0xMcpServerConfig>;
 
 export interface H0xConfigPaths {
 	global: string;
@@ -47,12 +57,21 @@ export const DEFAULT_H0X_CONFIG: H0xConfig = {
 	telemetry: false,
 };
 
-export const SUPPORTED_H0X_PROVIDER_NAMES = ["openai", "anthropic", "gemini", "openrouter", "ollama"] as const;
+export const SUPPORTED_H0X_PROVIDER_NAMES = [
+	"openai",
+	"anthropic",
+	"gemini",
+	"openrouter",
+	"ollama",
+	"opencode",
+	"opencode-go",
+] as const;
 
 const CONFIG_KEYS = new Set<string>(["defaultModel", "providers", "agentsDir", "mcpServers", "telemetry"]);
 const OBJECT_KEYS = new Set<string>(["providers", "mcpServers"]);
 const PROVIDER_KEYS = new Set<string>(["apiKey", "baseUrl", "enabled", "model"]);
 const PROVIDER_NAMES = new Set<string>(SUPPORTED_H0X_PROVIDER_NAMES);
+const MCP_SERVER_KEYS = new Set<string>(["command", "args", "env", "enabled", "tools"]);
 
 export class H0xConfigError extends Error {
 	readonly path?: string;
@@ -76,6 +95,10 @@ function cloneProviders(value: H0xProvidersConfig): H0xProvidersConfig {
 	return structuredClone(value) as H0xProvidersConfig;
 }
 
+function cloneMcpServers(value: H0xMcpServersConfig): H0xMcpServersConfig {
+	return structuredClone(value) as H0xMcpServersConfig;
+}
+
 function deepMergeRecord(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {
 	const result = cloneRecord(base);
 	for (const [key, value] of Object.entries(override)) {
@@ -97,8 +120,8 @@ function mergeConfig(base: H0xConfig, override: PartialH0xConfig): H0xConfig {
 			: cloneProviders(base.providers),
 		agentsDir: override.agentsDir ?? base.agentsDir,
 		mcpServers: override.mcpServers
-			? deepMergeRecord(base.mcpServers, override.mcpServers)
-			: cloneRecord(base.mcpServers),
+			? (deepMergeRecord(base.mcpServers, override.mcpServers) as H0xMcpServersConfig)
+			: cloneMcpServers(base.mcpServers),
 		telemetry: override.telemetry ?? base.telemetry,
 	};
 }
@@ -160,6 +183,73 @@ function validateProvidersConfig(value: Record<string, unknown>, path?: string):
 	return providers;
 }
 
+function validateMcpServerName(name: string, path?: string): void {
+	if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(name)) {
+		throw new H0xConfigError("Invalid H-0x MCP server name: use letters, numbers, underscores, or hyphens.", path);
+	}
+}
+
+function validateMcpServerConfig(name: string, value: unknown, path?: string): H0xMcpServerConfig {
+	if (!isPlainRecord(value)) {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}: expected object.`, path);
+	}
+
+	const command = value.command;
+	if (command !== undefined && (typeof command !== "string" || command.trim() === "")) {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}.command: expected non-empty string.`, path);
+	}
+
+	const args = value.args;
+	if (args !== undefined && (!Array.isArray(args) || !args.every((arg) => typeof arg === "string"))) {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}.args: expected string array.`, path);
+	}
+
+	const env = value.env;
+	if (env !== undefined && (!isPlainRecord(env) || !Object.values(env).every((item) => typeof item === "string"))) {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}.env: expected string map.`, path);
+	}
+
+	const enabled = value.enabled ?? true;
+	if (typeof enabled !== "boolean") {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}.enabled: expected boolean.`, path);
+	}
+
+	const tools = value.tools;
+	if (
+		tools !== undefined &&
+		(!isPlainRecord(tools) || !Object.values(tools).every((item) => typeof item === "string" && item.trim() !== ""))
+	) {
+		throw new H0xConfigError(`Invalid H-0x MCP server config for ${name}.tools: expected string map.`, path);
+	}
+
+	for (const key of Object.keys(value)) {
+		if (!MCP_SERVER_KEYS.has(key)) {
+			throw new H0xConfigError(`Invalid H-0x MCP server config key for ${name}: ${key}`, path);
+		}
+	}
+
+	return {
+		...(command !== undefined ? { command } : {}),
+		...(args !== undefined ? { args: [...args] } : {}),
+		...(env !== undefined
+			? { env: Object.fromEntries(Object.entries(env).map(([key, item]) => [key, item as string])) }
+			: {}),
+		enabled,
+		...(tools !== undefined
+			? { tools: Object.fromEntries(Object.entries(tools).map(([key, item]) => [key, item as string])) }
+			: {}),
+	};
+}
+
+function validateMcpServersConfig(value: Record<string, unknown>, path?: string): H0xMcpServersConfig {
+	const servers: H0xMcpServersConfig = {};
+	for (const [name, config] of Object.entries(value)) {
+		validateMcpServerName(name, path);
+		servers[name] = validateMcpServerConfig(name, config, path);
+	}
+	return servers;
+}
+
 function validateConfigShape(value: unknown, path?: string): PartialH0xConfig {
 	if (!isPlainRecord(value)) {
 		throw new H0xConfigError("Invalid H-0x config: expected a JSON object.", path);
@@ -191,7 +281,7 @@ function validateConfigShape(value: unknown, path?: string): PartialH0xConfig {
 				if (key === "providers") {
 					config.providers = validateProvidersConfig(item, path);
 				} else {
-					config.mcpServers = cloneRecord(item);
+					config.mcpServers = validateMcpServersConfig(item, path);
 				}
 				break;
 			case "telemetry":
@@ -316,6 +406,48 @@ export function removeH0xProviderConfig(globalPath: string, name: string): H0xCo
 	}
 	writeFileSync(globalPath, `${JSON.stringify(validated, null, 2)}\n`, "utf-8");
 	return merged;
+}
+
+export function addH0xMcpServerConfig(
+	globalPath: string,
+	name: string,
+	serverConfig: Omit<H0xMcpServerConfig, "enabled"> & { enabled?: boolean },
+): H0xConfig {
+	validateMcpServerName(name);
+	return setH0xConfigValue(globalPath, `mcpServers.${name}`, {
+		enabled: true,
+		...serverConfig,
+	});
+}
+
+export function removeH0xMcpServerConfig(globalPath: string, name: string): H0xConfig {
+	validateMcpServerName(name);
+	const current = readConfigFile(globalPath);
+	const next = structuredClone(current) as Record<string, unknown>;
+	const mcpServers = isPlainRecord(next.mcpServers) ? { ...next.mcpServers } : {};
+	delete mcpServers[name];
+	if (Object.keys(mcpServers).length > 0) {
+		next.mcpServers = mcpServers;
+	} else {
+		delete next.mcpServers;
+	}
+	const validated = validateConfigShape(next, globalPath);
+	const merged = mergeConfig(DEFAULT_H0X_CONFIG, validated);
+	const dir = dirname(globalPath);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	writeFileSync(globalPath, `${JSON.stringify(validated, null, 2)}\n`, "utf-8");
+	return merged;
+}
+
+export function setH0xMcpServerEnabled(globalPath: string, name: string, enabled: boolean): H0xConfig {
+	validateMcpServerName(name);
+	const current = loadH0xConfig({ globalPath, projectPath: "__missing_project_config__" });
+	if (!current.mcpServers[name]) {
+		throw new H0xConfigError(`MCP server not found: ${name}`);
+	}
+	return setH0xConfigValue(globalPath, `mcpServers.${name}.enabled`, enabled);
 }
 
 export function parseH0xConfigCliValue(value: string): unknown {

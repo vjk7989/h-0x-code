@@ -19,12 +19,14 @@ type ThemeFile = {
 describe("getThemeExportColors", () => {
 	let tempRoot: string;
 	let previousAgentDir: string | undefined;
+	let agentDir: string;
 
 	beforeEach(() => {
 		tempRoot = mkdtempSync(join(tmpdir(), "pi-theme-export-"));
 		previousAgentDir = process.env[ENV_AGENT_DIR];
-		process.env[ENV_AGENT_DIR] = join(tempRoot, "agent");
-		mkdirSync(join(process.env[ENV_AGENT_DIR], "themes"), { recursive: true });
+		agentDir = join(tempRoot, "agent");
+		process.env[ENV_AGENT_DIR] = agentDir;
+		mkdirSync(join(agentDir, "themes"), { recursive: true });
 	});
 
 	afterEach(() => {
@@ -58,10 +60,7 @@ describe("getThemeExportColors", () => {
 			},
 		};
 
-		writeFileSync(
-			join(process.env[ENV_AGENT_DIR]!, "themes", "custom-export-vars.json"),
-			JSON.stringify(customTheme, null, 2),
-		);
+		writeFileSync(join(agentDir, "themes", "custom-export-vars.json"), JSON.stringify(customTheme, null, 2));
 
 		expect(getThemeExportColors("custom-export-vars")).toEqual({
 			pageBg: "#112233",
@@ -91,10 +90,7 @@ describe("getThemeExportColors", () => {
 			},
 		};
 
-		writeFileSync(
-			join(process.env[ENV_AGENT_DIR]!, "themes", "custom-export-recursive.json"),
-			JSON.stringify(customTheme, null, 2),
-		);
+		writeFileSync(join(agentDir, "themes", "custom-export-recursive.json"), JSON.stringify(customTheme, null, 2));
 
 		expect(getThemeExportColors("custom-export-recursive")).toEqual({
 			pageBg: "#abcdef",

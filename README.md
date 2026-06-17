@@ -16,6 +16,16 @@ This repository is based on the Pi agent harness project and keeps internal pack
 * **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
 * **[@earendil-works/pi-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
 
+Install the H-0x Code CLI package with:
+
+```bash
+npm install -g @hyper-0x/h0x-code --ignore-scripts
+h0x --version
+h0x --help
+```
+
+See [docs/h0x-installation.md](docs/h0x-installation.md) for installer dry-runs and local package smoke guidance.
+
 To learn more about the upstream Pi harness:
 
 * [Visit pi.dev](https://pi.dev), the project website with demos

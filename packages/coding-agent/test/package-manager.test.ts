@@ -43,6 +43,11 @@ interface PackageManagerInternals {
 		source: { type: "npm"; spec: string; name: string; pinned: boolean },
 		scope: "user" | "project" | "temporary",
 	): string;
+	installNpm(
+		source: { type: "npm"; spec: string; name: string; pinned: boolean },
+		scope: "user" | "project" | "temporary",
+		refresh: boolean,
+	): Promise<void>;
 	getGitInstallPath(
 		source: { type: "git"; repo: string; host: string; path: string; pinned: boolean; ref?: string },
 		scope: "user" | "project" | "temporary",
@@ -1088,6 +1093,9 @@ Content`,
 		it("should emit progress events on install attempt", async () => {
 			const events: ProgressEvent[] = [];
 			packageManager.setProgressCallback((event) => events.push(event));
+			vi.spyOn(packageManager as unknown as PackageManagerInternals, "installNpm").mockRejectedValue(
+				new Error("install failed"),
+			);
 
 			// Use public install method which emits progress events
 			try {

@@ -69,6 +69,26 @@ function getTextOutput(result: { content?: Array<{ type: string; text?: string }
 	);
 }
 
+async function removeDirWithRetry(path: string): Promise<void> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		try {
+			rmSync(path, { recursive: true, force: true });
+			return;
+		} catch (error) {
+			const code = error instanceof Error && "code" in error ? (error as { code?: unknown }).code : undefined;
+			if (code !== "EBUSY" && code !== "ENOTEMPTY" && code !== "EPERM") {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+		}
+	}
+	try {
+		rmSync(path, { recursive: true, force: true });
+	} catch {
+		// Windows can briefly keep inherited stdio handles open after the assertions pass.
+	}
+}
+
 describe.skipIf(process.platform !== "win32")("Windows child-process close handling", () => {
 	let testDir: string;
 
@@ -77,8 +97,8 @@ describe.skipIf(process.platform !== "win32")("Windows child-process close handl
 		mkdirSync(testDir, { recursive: true });
 	});
 
-	afterEach(() => {
-		rmSync(testDir, { recursive: true, force: true });
+	afterEach(async () => {
+		await removeDirWithRetry(testDir);
 	});
 
 	it("executeBash resolves after the shell exits even if inherited stdio handles stay open", async () => {

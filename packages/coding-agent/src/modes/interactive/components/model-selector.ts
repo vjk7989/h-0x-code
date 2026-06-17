@@ -10,6 +10,7 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 import type { ModelRegistry } from "../../../core/model-registry.ts";
+import { sortModelsForDisplay } from "../../../core/model-resolver.ts";
 import type { SettingsManager } from "../../../core/settings-manager.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -181,16 +182,11 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	}
 
 	private sortModels(models: ModelItem[]): ModelItem[] {
-		const sorted = [...models];
-		// Sort: current model first, then by provider
-		sorted.sort((a, b) => {
-			const aIsCurrent = modelsAreEqual(this.currentModel, a.model);
-			const bIsCurrent = modelsAreEqual(this.currentModel, b.model);
-			if (aIsCurrent && !bIsCurrent) return -1;
-			if (!aIsCurrent && bIsCurrent) return 1;
-			return a.provider.localeCompare(b.provider);
-		});
-		return sorted;
+		const byKey = new Map(models.map((item) => [`${item.provider}/${item.id}`, item]));
+		return sortModelsForDisplay(
+			models.map((item) => item.model),
+			this.currentModel,
+		).map((model) => byKey.get(`${model.provider}/${model.id}`)!);
 	}
 
 	private getScopeText(): string {

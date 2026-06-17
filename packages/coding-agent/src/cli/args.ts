@@ -242,6 +242,8 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} uninstall <source> [-l]   Alias for remove
   ${APP_NAME} update [source|self|${APP_NAME}]  Update ${APP_NAME} and installed extensions
   ${APP_NAME} list                      List installed extensions from settings
+  ${APP_NAME} init                      Initialize H-0x project memory and agents
+  ${APP_NAME} setup                     Initialize H-0x project defaults and print next steps
   ${APP_NAME} config                    Open TUI to enable/disable package resources
   ${APP_NAME} config get [key]          Show merged H-0x config or one key
   ${APP_NAME} config set <key> <value>  Set a global H-0x config value
@@ -250,12 +252,37 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} provider add <provider>   Add an H-0x provider config
   ${APP_NAME} provider remove <provider> Remove an H-0x provider config
   ${APP_NAME} provider test <provider>  Validate an H-0x provider config
+  ${APP_NAME} mcp list                  List configured H-0x MCP servers
+  ${APP_NAME} mcp add <name>            Add an H-0x MCP server config
+  ${APP_NAME} mcp remove <name>         Remove an H-0x MCP server config
+  ${APP_NAME} mcp enable <name>         Enable an H-0x MCP server
+  ${APP_NAME} mcp disable <name>        Disable an H-0x MCP server
+  ${APP_NAME} mcp test <name>           Validate an H-0x MCP server config
+  ${APP_NAME} mcp doctor <name>         Inspect live MCP tools and command matches
+  ${APP_NAME} github login              Show GitHub MCP auth guidance
+  ${APP_NAME} github status             Check GitHub MCP readiness
+  ${APP_NAME} github issues             Route GitHub issues through MCP
+  ${APP_NAME} github prs                Route GitHub pull requests through MCP
+  ${APP_NAME} github create-pr          Route pull request creation through MCP
+  ${APP_NAME} github review-pr          Route pull request review through MCP
+  ${APP_NAME} linear issues             Route Linear issues through MCP
+  ${APP_NAME} linear create             Route Linear issue creation through MCP
+  ${APP_NAME} jira issues               Route Jira issues through MCP
+  ${APP_NAME} jira create               Route Jira issue creation through MCP
+  ${APP_NAME} notion search             Route Notion search through MCP
+  ${APP_NAME} memory init               Create project memory files
+  ${APP_NAME} memory show [section]     Show project memory
+  ${APP_NAME} memory add <section>      Append project memory
+  ${APP_NAME} memory update <section>   Replace project memory
+  ${APP_NAME} memory search <query>     Search project memory
   ${APP_NAME} agent list                List configured H-0x agents
+  ${APP_NAME} agent init                Create default project H-0x agents
   ${APP_NAME} agent create              Create a global H-0x agent
   ${APP_NAME} agent create --from-prompt Create a global H-0x agent from one prompt
   ${APP_NAME} agent show <name>         Show an H-0x agent
   ${APP_NAME} agent edit <name>         Print an H-0x agent file path
   ${APP_NAME} agent delete <name>       Delete an H-0x agent
+  ${APP_NAME} @<agent> <task>           Run a task with an H-0x agent prompt
   ${APP_NAME} run @<agent> <task>       Run a task with an H-0x agent prompt
   ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list
 

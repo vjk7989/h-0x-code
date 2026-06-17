@@ -23,7 +23,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	google: "gemini-3.1-pro-preview",
 	"google-vertex": "gemini-3.1-pro-preview",
 	"github-copilot": "gpt-5.4",
-	openrouter: "moonshotai/kimi-k2.6",
+	openrouter: "qwen/qwen3-coder:free",
 	"vercel-ai-gateway": "zai/glm-5.1",
 	xai: "grok-4.20-0309-reasoning",
 	groq: "openai/gpt-oss-120b",
@@ -49,10 +49,66 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
 };
 
+const FREE_MODEL_PROVIDER_PRIORITY = ["openrouter"] as const;
+const FREE_CODING_MODEL_PATTERN = /coder|code|qwen|deepseek|glm|kimi|mistral|llama/i;
+
 export interface ScopedModel {
 	model: Model<Api>;
 	/** Thinking level if explicitly specified in pattern (e.g., "model:high"), undefined otherwise */
 	thinkingLevel?: ThinkingLevel;
+}
+
+function isPreferredFreeModel(model: Model<Api>): boolean {
+	return model.provider === "openrouter" && model.id.endsWith(":free");
+}
+
+function freeModelRank(model: Model<Api>): number {
+	if (!isPreferredFreeModel(model)) return 2;
+	return FREE_CODING_MODEL_PATTERN.test(model.id) ? 0 : 1;
+}
+
+function providerRank(model: Model<Api>): number {
+	const rank = FREE_MODEL_PROVIDER_PRIORITY.indexOf(model.provider as (typeof FREE_MODEL_PROVIDER_PRIORITY)[number]);
+	return rank === -1 ? FREE_MODEL_PROVIDER_PRIORITY.length : rank;
+}
+
+export function sortModelsForDisplay(models: readonly Model<Api>[], currentModel?: Model<Api>): Model<Api>[] {
+	const sorted = [...models];
+	sorted.sort((a, b) => {
+		const freeCmp = freeModelRank(a) - freeModelRank(b);
+		if (freeCmp !== 0) return freeCmp;
+
+		const aIsCurrent = currentModel ? modelsAreEqual(currentModel, a) : false;
+		const bIsCurrent = currentModel ? modelsAreEqual(currentModel, b) : false;
+		if (aIsCurrent && !bIsCurrent) return -1;
+		if (!aIsCurrent && bIsCurrent) return 1;
+
+		const providerPriorityCmp = providerRank(a) - providerRank(b);
+		if (providerPriorityCmp !== 0) return providerPriorityCmp;
+
+		const providerCmp = a.provider.localeCompare(b.provider);
+		if (providerCmp !== 0) return providerCmp;
+		return a.id.localeCompare(b.id);
+	});
+	return sorted;
+}
+
+export function selectPreferredInitialModel(availableModels: readonly Model<Api>[]): Model<Api> | undefined {
+	const sorted = sortModelsForDisplay(availableModels);
+	const preferredFreeModel = sorted.find(isPreferredFreeModel);
+	if (preferredFreeModel) {
+		return preferredFreeModel;
+	}
+
+	for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
+		const defaultId = defaultModelPerProvider[provider];
+		const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
+		if (match) {
+			return match;
+		}
+	}
+
+	return sorted[0];
 }
 
 /**
@@ -589,17 +645,11 @@ export async function findInitialModel(options: {
 	const availableModels = await modelRegistry.getAvailable();
 
 	if (availableModels.length > 0) {
-		// Try to find a default model from known providers
-		for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
-			const defaultId = defaultModelPerProvider[provider];
-			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
-			if (match) {
-				return { model: match, thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
-			}
-		}
-
-		// If no default found, use first available
-		return { model: availableModels[0], thinkingLevel: DEFAULT_THINKING_LEVEL, fallbackMessage: undefined };
+		return {
+			model: selectPreferredInitialModel(availableModels),
+			thinkingLevel: DEFAULT_THINKING_LEVEL,
+			fallbackMessage: undefined,
+		};
 	}
 
 	// 5. No model found
@@ -650,21 +700,7 @@ export async function restoreModelFromSession(
 	const availableModels = await modelRegistry.getAvailable();
 
 	if (availableModels.length > 0) {
-		// Try to find a default model from known providers
-		let fallbackModel: Model<Api> | undefined;
-		for (const provider of Object.keys(defaultModelPerProvider) as KnownProvider[]) {
-			const defaultId = defaultModelPerProvider[provider];
-			const match = availableModels.find((m) => m.provider === provider && m.id === defaultId);
-			if (match) {
-				fallbackModel = match;
-				break;
-			}
-		}
-
-		// If no default found, use first available
-		if (!fallbackModel) {
-			fallbackModel = availableModels[0];
-		}
+		const fallbackModel = selectPreferredInitialModel(availableModels)!;
 
 		if (shouldPrintMessages) {
 			console.log(chalk.dim(`Falling back to: ${fallbackModel.provider}/${fallbackModel.id}`));

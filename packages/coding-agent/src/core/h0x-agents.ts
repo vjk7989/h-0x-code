@@ -22,6 +22,13 @@ export interface H0xAgentPaths {
 	project: string;
 }
 
+export interface InitDefaultH0xAgentsResult {
+	dir: string;
+	created: string[];
+	skipped: string[];
+	overwritten: string[];
+}
+
 export interface H0xAgentPathOptions {
 	homeDir?: string;
 	cwd?: string;
@@ -34,6 +41,83 @@ export interface LoadH0xAgentsOptions extends H0xAgentPathOptions {
 
 const SUPPORTED_AGENT_EXTENSIONS = new Set([".json", ".md", ".yaml", ".yml"]);
 const SUPPORTED_AGENT_TOOLS = new Set(["read", "edit", "terminal", "git", "mcp"]);
+
+export const DEFAULT_H0X_AGENTS: readonly H0xAgent[] = [
+	{
+		name: "architect",
+		description: "System architect",
+		systemPrompt:
+			"You are a system architect. Design maintainable technical plans, clarify tradeoffs, and keep implementation boundaries explicit.",
+		tools: ["read", "git"],
+	},
+	{
+		name: "frontend",
+		description: "Frontend engineer",
+		systemPrompt:
+			"You are a frontend engineer. Build accessible, responsive, polished user interfaces that fit the existing application design.",
+		tools: ["read", "edit", "terminal"],
+	},
+	{
+		name: "backend",
+		description: "Backend engineer",
+		systemPrompt:
+			"You are a backend engineer. Build reliable APIs, data flows, and service logic with clear validation and focused tests.",
+		tools: ["read", "edit", "terminal"],
+	},
+	{
+		name: "fullstack",
+		description: "Fullstack engineer",
+		systemPrompt:
+			"You are a fullstack engineer. Connect frontend and backend work carefully, preserving contracts across the whole user flow.",
+		tools: ["read", "edit", "terminal"],
+	},
+	{
+		name: "qa",
+		description: "QA engineer",
+		systemPrompt:
+			"You are a QA engineer. Find behavioral gaps, write practical tests, and verify fixes with clear reproduction steps.",
+		tools: ["read", "edit", "terminal"],
+	},
+	{
+		name: "security",
+		description: "Security reviewer",
+		systemPrompt:
+			"You are a security reviewer. Review authentication, authorization, secrets, input handling, and dependency risk with concrete remediation.",
+		tools: ["read", "terminal", "git"],
+	},
+	{
+		name: "devops",
+		description: "DevOps engineer",
+		systemPrompt:
+			"You are a DevOps engineer. Improve builds, CI, deployment, observability, and operational reliability using the existing project conventions.",
+		tools: ["read", "edit", "terminal"],
+	},
+	{
+		name: "product-manager",
+		description: "Product manager",
+		systemPrompt:
+			"You are a product manager. Translate goals into clear scope, user outcomes, acceptance criteria, and phased delivery plans.",
+		tools: ["read", "git"],
+	},
+	{
+		name: "code-reviewer",
+		description: "Code reviewer",
+		systemPrompt:
+			"You are a code reviewer. Prioritize bugs, regressions, missing tests, and maintainability risks with concise file-level feedback.",
+		tools: ["read", "terminal", "git"],
+	},
+	{
+		name: "docs-writer",
+		description: "Documentation writer",
+		systemPrompt:
+			"You are a documentation writer. Produce accurate, concise developer documentation that matches the code and avoids unsupported claims.",
+		tools: ["read", "edit", "terminal"],
+	},
+];
+
+export function getDefaultH0xAgent(name: string): H0xAgent | undefined {
+	return DEFAULT_H0X_AGENTS.find((agent) => agent.name === name);
+}
 
 export class H0xAgentError extends Error {
 	readonly path?: string;
@@ -216,6 +300,13 @@ export function findH0xAgent(name: string, options: LoadH0xAgentsOptions = {}): 
 	return loadH0xAgents(options).find((agent) => agent.name === name);
 }
 
+export function findH0xAgentOrDefault(
+	name: string,
+	options: LoadH0xAgentsOptions = {},
+): H0xLoadedAgent | H0xAgent | undefined {
+	return findH0xAgent(name, options) ?? getDefaultH0xAgent(name);
+}
+
 export function writeH0xAgentFile(dir: string, agent: H0xAgent): string {
 	const validated = validateAgent(agent);
 	mkdirSync(dir, { recursive: true });
@@ -225,6 +316,37 @@ export function writeH0xAgentFile(dir: string, agent: H0xAgent): string {
 	}
 	writeFileSync(filePath, stringify(validated), "utf-8");
 	return filePath;
+}
+
+export function initDefaultH0xAgents(
+	options: H0xAgentPathOptions & { force?: boolean } = {},
+): InitDefaultH0xAgentsResult {
+	const paths = getH0xAgentPaths(options);
+	mkdirSync(paths.project, { recursive: true });
+	const result: InitDefaultH0xAgentsResult = {
+		dir: paths.project,
+		created: [],
+		skipped: [],
+		overwritten: [],
+	};
+
+	for (const agent of DEFAULT_H0X_AGENTS) {
+		const validated = validateAgent(agent);
+		const filePath = join(paths.project, `${createSafeH0xAgentName(validated.name)}.yaml`);
+		const existedBefore = existsSync(filePath);
+		if (existedBefore && !options.force) {
+			result.skipped.push(validated.name);
+			continue;
+		}
+		writeFileSync(filePath, stringify(validated), "utf-8");
+		if (existedBefore) {
+			result.overwritten.push(validated.name);
+		} else {
+			result.created.push(validated.name);
+		}
+	}
+
+	return result;
 }
 
 export function deleteH0xAgentFile(agent: H0xLoadedAgent): void {

@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent, type AgentEvent, type AgentTool } from "@earendil-works/pi-agent-core";
-import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@earendil-works/pi-ai";
+import {
+	type Api,
+	type AssistantMessage,
+	type AssistantMessageEvent,
+	EventStream,
+	getModel,
+	type Model,
+} from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
@@ -49,6 +56,21 @@ function createAssistantMessage(text: string, overrides?: Partial<AssistantMessa
 type SessionWithExtensionEmitHook = {
 	_emitExtensionEvent: (event: AgentEvent) => Promise<void>;
 };
+
+function createOpenRouterFreeModel(id: string): Model<Api> {
+	return {
+		id,
+		name: id,
+		api: "openai-completions",
+		provider: "openrouter",
+		baseUrl: "https://openrouter.ai/api/v1",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 16384,
+	};
+}
 
 describe("AgentSession retry", () => {
 	let session: AgentSession;
@@ -314,5 +336,218 @@ describe("AgentSession retry", () => {
 		// A follow-up prompt must work (no "Agent is already processing" error)
 		await session.prompt("Follow-up");
 		expect(callCount).toBe(4);
+	});
+
+	it("falls back to another OpenRouter free model on temporary upstream rate limits", async () => {
+		const primary = createOpenRouterFreeModel("google/gemma-4-26b-a4b-it:free");
+		const fallback = createOpenRouterFreeModel("qwen/qwen3-coder:free");
+		const callModels: string[] = [];
+		let agent: Agent;
+
+		agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: primary, systemPrompt: "Test", tools: [] },
+			streamFn: () => {
+				const activeModel = agent.state.model!;
+				callModels.push(activeModel.id);
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					if (activeModel.id === primary.id) {
+						const msg = createAssistantMessage("", {
+							api: activeModel.api,
+							provider: activeModel.provider,
+							model: activeModel.id,
+							stopReason: "error",
+							errorMessage:
+								"Error: 429 Provider returned error\n" +
+								`${activeModel.id} is temporarily rate-limited upstream. Please retry shortly.`,
+						});
+						stream.push({ type: "start", partial: msg });
+						stream.push({ type: "error", reason: "error", error: msg });
+						return;
+					}
+
+					const msg = createAssistantMessage("Recovered on another free model", {
+						api: activeModel.api,
+						provider: activeModel.provider,
+						model: activeModel.id,
+					});
+					stream.push({ type: "start", partial: msg });
+					stream.push({ type: "done", reason: "stop", message: msg });
+				});
+				return stream;
+			},
+		});
+
+		const sessionManager = SessionManager.inMemory();
+		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+		authStorage.setRuntimeApiKey("openrouter", "test-key");
+		settingsManager.setDefaultModelAndProvider(primary.provider, primary.id);
+		settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } });
+		modelRegistry.registerProvider("openrouter", {
+			api: "openai-completions",
+			apiKey: "test-key",
+			baseUrl: "https://openrouter.ai/api/v1",
+			models: [primary, fallback],
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settingsManager,
+			cwd: tempDir,
+			modelRegistry,
+			resourceLoader: createTestResourceLoader(),
+		});
+
+		const retryEvents: string[] = [];
+		const assistantErrorEvents: string[] = [];
+		session.subscribe((event) => {
+			if (event.type === "auto_retry_start") retryEvents.push(`retry:${event.attempt}`);
+			if (
+				(event.type === "message_start" || event.type === "message_update" || event.type === "message_end") &&
+				event.message.role === "assistant" &&
+				event.message.stopReason === "error"
+			) {
+				assistantErrorEvents.push(event.type);
+			}
+		});
+
+		await session.prompt("Test");
+
+		expect(callModels).toEqual([primary.id, fallback.id]);
+		expect(session.model?.id).toBe(fallback.id);
+		expect(settingsManager.getDefaultModel()).toBe(primary.id);
+		expect(retryEvents).toEqual([]);
+		expect(assistantErrorEvents).toEqual([]);
+		expect(
+			session.messages.filter((message) => message.role === "assistant" && message.stopReason === "error"),
+		).toEqual([]);
+	});
+
+	it("does not fall back OpenRouter free models for account usage limits", async () => {
+		const primary = createOpenRouterFreeModel("google/gemma-4-26b-a4b-it:free");
+		const fallback = createOpenRouterFreeModel("qwen/qwen3-coder:free");
+		let callCount = 0;
+		let agent: Agent;
+
+		agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: primary, systemPrompt: "Test", tools: [] },
+			streamFn: () => {
+				callCount++;
+				const activeModel = agent.state.model!;
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					const msg = createAssistantMessage("", {
+						api: activeModel.api,
+						provider: activeModel.provider,
+						model: activeModel.id,
+						stopReason: "error",
+						errorMessage: "FreeUsageLimitError: Monthly usage limit reached",
+					});
+					stream.push({ type: "start", partial: msg });
+					stream.push({ type: "error", reason: "error", error: msg });
+				});
+				return stream;
+			},
+		});
+
+		const sessionManager = SessionManager.inMemory();
+		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+		authStorage.setRuntimeApiKey("openrouter", "test-key");
+		settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } });
+		modelRegistry.registerProvider("openrouter", {
+			api: "openai-completions",
+			apiKey: "test-key",
+			baseUrl: "https://openrouter.ai/api/v1",
+			models: [primary, fallback],
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settingsManager,
+			cwd: tempDir,
+			modelRegistry,
+			resourceLoader: createTestResourceLoader(),
+		});
+
+		await session.prompt("Test");
+
+		expect(callCount).toBe(1);
+		expect(session.model?.id).toBe(primary.id);
+	});
+
+	it("uses scoped OpenRouter free fallback models before global available models", async () => {
+		const primary = createOpenRouterFreeModel("google/gemma-4-26b-a4b-it:free");
+		const scopedFallback = createOpenRouterFreeModel("deepseek/deepseek-chat-v3.1:free");
+		const globalFallback = createOpenRouterFreeModel("qwen/qwen3-coder:free");
+		const callModels: string[] = [];
+		let agent: Agent;
+
+		agent = new Agent({
+			getApiKey: () => "test-key",
+			initialState: { model: primary, systemPrompt: "Test", tools: [] },
+			streamFn: () => {
+				const activeModel = agent.state.model!;
+				callModels.push(activeModel.id);
+				const stream = new MockAssistantStream();
+				queueMicrotask(() => {
+					if (activeModel.id === primary.id) {
+						const msg = createAssistantMessage("", {
+							api: activeModel.api,
+							provider: activeModel.provider,
+							model: activeModel.id,
+							stopReason: "error",
+							errorMessage: "Error: 429 Provider returned error: temporarily rate-limited upstream.",
+						});
+						stream.push({ type: "start", partial: msg });
+						stream.push({ type: "error", reason: "error", error: msg });
+						return;
+					}
+
+					const msg = createAssistantMessage("Recovered", {
+						api: activeModel.api,
+						provider: activeModel.provider,
+						model: activeModel.id,
+					});
+					stream.push({ type: "start", partial: msg });
+					stream.push({ type: "done", reason: "stop", message: msg });
+				});
+				return stream;
+			},
+		});
+
+		const sessionManager = SessionManager.inMemory();
+		const settingsManager = SettingsManager.create(tempDir, tempDir);
+		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
+		authStorage.setRuntimeApiKey("openrouter", "test-key");
+		modelRegistry.registerProvider("openrouter", {
+			api: "openai-completions",
+			apiKey: "test-key",
+			baseUrl: "https://openrouter.ai/api/v1",
+			models: [primary, scopedFallback, globalFallback],
+		});
+
+		session = new AgentSession({
+			agent,
+			sessionManager,
+			settingsManager,
+			cwd: tempDir,
+			modelRegistry,
+			resourceLoader: createTestResourceLoader(),
+			scopedModels: [{ model: primary }, { model: scopedFallback }],
+		});
+
+		await session.prompt("Test");
+
+		expect(callModels).toEqual([primary.id, scopedFallback.id]);
+		expect(session.model?.id).toBe(scopedFallback.id);
 	});
 });

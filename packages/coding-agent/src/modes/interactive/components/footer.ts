@@ -3,7 +3,9 @@ import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/p
 import type { AgentSession } from "../../../core/agent-session.ts";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.ts";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.ts";
+import { loadH0xConfig } from "../../../core/h0x-config.ts";
 import { theme } from "../theme/theme.ts";
+import { type H0xStatusBadgeOptions, StatusBadge } from "./h0x-shell.ts";
 
 /**
  * Sanitize text for display in a single-line status.
@@ -26,6 +28,50 @@ function formatTokens(count: number): string {
 	if (count < 1000000) return `${Math.round(count / 1000)}k`;
 	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
 	return `${Math.round(count / 1000000)}M`;
+}
+
+function getConfiguredMcpServerCount(cwd: string): number {
+	try {
+		const config = loadH0xConfig({ cwd });
+		return Object.values(config.mcpServers).filter((server) => server.enabled !== false).length;
+	} catch {
+		return 0;
+	}
+}
+
+function getGithubStatus(cwd: string): "connected" | "disconnected" {
+	if (process.env.GITHUB_TOKEN || process.env.GH_TOKEN) {
+		return "connected";
+	}
+	try {
+		const config = loadH0xConfig({ cwd });
+		const githubServer = config.mcpServers.github;
+		if (githubServer?.enabled !== false && (githubServer?.env?.GITHUB_TOKEN || githubServer?.env?.GH_TOKEN)) {
+			return "connected";
+		}
+	} catch {
+		// Keep the badge conservative if config cannot be loaded.
+	}
+	return "disconnected";
+}
+
+function joinBadges(badges: H0xStatusBadgeOptions[], width: number): string {
+	const rendered = badges.map((badge) => new StatusBadge(badge).render(width)[0]);
+	const parts: string[] = [];
+	let used = 0;
+	for (const badge of rendered) {
+		const badgeWidth = visibleWidth(badge);
+		const nextWidth = parts.length === 0 ? badgeWidth : used + 1 + badgeWidth;
+		if (nextWidth > width) {
+			break;
+		}
+		parts.push(badge);
+		used = nextWidth;
+	}
+	if (parts.length === 0 && rendered[0]) {
+		return truncateToWidth(rendered[0], width, theme.fg("dim", "..."));
+	}
+	return parts.join(" ");
 }
 
 export function formatCwdForFooter(cwd: string, home: string | undefined): string {
@@ -113,8 +159,9 @@ export class FooterComponent implements Component {
 		const contextPercentValue = contextUsage?.percent ?? 0;
 		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
+		const cwd = this.session.sessionManager.getCwd();
 		// Replace home directory with ~
-		let pwd = formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+		let pwd = formatCwdForFooter(cwd, process.env.HOME || process.env.USERPROFILE);
 
 		// Add git branch if available
 		const branch = this.footerData.getGitBranch();
@@ -227,8 +274,24 @@ export class FooterComponent implements Component {
 		const remainder = statsLine.slice(statsLeft.length); // padding + rightSide
 		const dimRemainder = theme.fg("dim", remainder);
 
+		const githubStatus = getGithubStatus(cwd);
+		const mcpCount = getConfiguredMcpServerCount(cwd);
+		const badgeLine = joinBadges(
+			[
+				{ label: "model", value: modelName, tone: state.model ? "accent" : "warning" },
+				{ label: "agent", value: "default", tone: "muted" },
+				{ label: "mcp", value: `${mcpCount} connected`, tone: mcpCount > 0 ? "success" : "muted" },
+				{ label: "github", value: githubStatus, tone: githubStatus === "connected" ? "success" : "muted" },
+				{
+					label: "state",
+					value: state.isStreaming ? "working" : "idle",
+					tone: state.isStreaming ? "accent" : "success",
+				},
+			],
+			width,
+		);
 		const pwdLine = truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-		const lines = [pwdLine, dimStatsLeft + dimRemainder];
+		const lines = [badgeLine, pwdLine, dimStatsLeft + dimRemainder];
 
 		// Add extension statuses on a single line, sorted by key alphabetically
 		const extensionStatuses = this.footerData.getExtensionStatuses();

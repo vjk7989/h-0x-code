@@ -38,7 +38,7 @@ describe("H-0x config", () => {
 				defaultModel: "openai/gpt-4o",
 				providers: { openai: { model: "gpt-4o" } },
 				agentsDir: ".h0x/custom-agents",
-				mcpServers: { local: { command: "node" } },
+				mcpServers: { local: { command: "node", enabled: true } },
 				telemetry: true,
 			}),
 		);
@@ -47,7 +47,7 @@ describe("H-0x config", () => {
 			defaultModel: "openai/gpt-4o",
 			providers: { openai: { model: "gpt-4o" } },
 			agentsDir: ".h0x/custom-agents",
-			mcpServers: { local: { command: "node" } },
+			mcpServers: { local: { command: "node", enabled: true } },
 			telemetry: true,
 		});
 	});
