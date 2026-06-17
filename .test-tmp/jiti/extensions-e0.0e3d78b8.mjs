@@ -1,0 +1,1 @@
+"use strict";Object.defineProperty(exports, "__esModule", { value: true });exports.default = void 0;var _default = (p) => p.on("input", async (e) => ({ action: "transform", text: e.text + "[1]" }));exports.default = _default; /* v9-63e560589268f19e */

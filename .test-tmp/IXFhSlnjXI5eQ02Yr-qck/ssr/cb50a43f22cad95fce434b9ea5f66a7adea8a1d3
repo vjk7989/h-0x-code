@@ -1,0 +1,121 @@
+const __vite_ssr_import_0__ = await __vite_ssr_import__("node:fs", {"importedNames":["mkdirSync","rmSync","writeFileSync"]});
+const __vite_ssr_import_1__ = await __vite_ssr_import__("node:os", {"importedNames":["tmpdir"]});
+const __vite_ssr_import_2__ = await __vite_ssr_import__("node:path", {"importedNames":["join"]});
+const __vite_ssr_import_3__ = await __vite_ssr_import__("vitest", {"importedNames":["afterEach","beforeEach","describe","expect","it"]});
+const __vite_ssr_import_4__ = await __vite_ssr_import__("/src/core/resource-loader.ts", {"importedNames":["DefaultResourceLoader"]});
+
+
+
+
+
+(0,__vite_ssr_import_3__.describe)("issue #2781 skill collision precedence: user skills should override package skills", () => {
+  let tempDir;
+  let agentDir;
+  let cwd;
+  (0,__vite_ssr_import_3__.beforeEach)(() => {
+    tempDir = (0,__vite_ssr_import_2__.join)((0,__vite_ssr_import_1__.tmpdir)(), `pi-2781-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    agentDir = (0,__vite_ssr_import_2__.join)(tempDir, "agent");
+    cwd = (0,__vite_ssr_import_2__.join)(tempDir, "project");
+    (0,__vite_ssr_import_0__.mkdirSync)(agentDir, { recursive: true });
+    (0,__vite_ssr_import_0__.mkdirSync)(cwd, { recursive: true });
+  });
+  (0,__vite_ssr_import_3__.afterEach)(() => {
+    (0,__vite_ssr_import_0__.rmSync)(tempDir, { recursive: true, force: true });
+  });
+  function createPackageWithSkill(name, description) {
+    const pkgDir = (0,__vite_ssr_import_2__.join)(tempDir, `fake-package-${name}`);
+    const skillDir = (0,__vite_ssr_import_2__.join)(pkgDir, "skills", name);
+    (0,__vite_ssr_import_0__.mkdirSync)(skillDir, { recursive: true });
+    (0,__vite_ssr_import_0__.writeFileSync)(
+      (0,__vite_ssr_import_2__.join)(pkgDir, "package.json"),
+      JSON.stringify({ name: `fake-pkg-${name}`, version: "1.0.0", pi: { skills: [`skills/${name}`] } }, null, 2)
+    );
+    (0,__vite_ssr_import_0__.writeFileSync)(
+      (0,__vite_ssr_import_2__.join)(skillDir, "SKILL.md"),
+      `---
+name: ${name}
+description: ${description}
+---
+Package skill content`
+    );
+    return pkgDir;
+  }
+  function createUserSkill(name, description) {
+    const skillDir = (0,__vite_ssr_import_2__.join)(agentDir, "skills", name);
+    (0,__vite_ssr_import_0__.mkdirSync)(skillDir, { recursive: true });
+    const skillPath = (0,__vite_ssr_import_2__.join)(skillDir, "SKILL.md");
+    (0,__vite_ssr_import_0__.writeFileSync)(skillPath, `---
+name: ${name}
+description: ${description}
+---
+User skill content`);
+    return skillPath;
+  }
+  function createProjectSkill(name, description) {
+    const skillDir = (0,__vite_ssr_import_2__.join)(cwd, ".pi", "skills", name);
+    (0,__vite_ssr_import_0__.mkdirSync)(skillDir, { recursive: true });
+    const skillPath = (0,__vite_ssr_import_2__.join)(skillDir, "SKILL.md");
+    (0,__vite_ssr_import_0__.writeFileSync)(skillPath, `---
+name: ${name}
+description: ${description}
+---
+Project skill content`);
+    return skillPath;
+  }
+  function createSettingsWithPackage(pkgDir, scope) {
+    const settingsDir = scope === "user" ? agentDir : (0,__vite_ssr_import_2__.join)(cwd, ".pi");
+    (0,__vite_ssr_import_0__.mkdirSync)(settingsDir, { recursive: true });
+    (0,__vite_ssr_import_0__.writeFileSync)((0,__vite_ssr_import_2__.join)(settingsDir, "settings.json"), JSON.stringify({ packages: [pkgDir] }, null, 2));
+  }
+  (0,__vite_ssr_import_3__.it)("user auto-discovered skill should override package skill with same name", async () => {
+    const pkgDir = createPackageWithSkill("web-fetch", "Package web-fetch skill");
+    const userSkillPath = createUserSkill("web-fetch", "User web-fetch override");
+    createSettingsWithPackage(pkgDir, "user");
+    const loader = new __vite_ssr_import_4__.DefaultResourceLoader({ cwd, agentDir });
+    await loader.reload();
+    const { skills } = loader.getSkills();
+    const webFetch = skills.find((s) => s.name === "web-fetch");
+    (0,__vite_ssr_import_3__.expect)(webFetch).toBeDefined();
+    (0,__vite_ssr_import_3__.expect)(webFetch.filePath).toBe(userSkillPath);
+    (0,__vite_ssr_import_3__.expect)(webFetch.description).toBe("User web-fetch override");
+  });
+  (0,__vite_ssr_import_3__.it)("project auto-discovered skill should override package skill with same name", async () => {
+    const pkgDir = createPackageWithSkill("web-fetch", "Package web-fetch skill");
+    const projectSkillPath = createProjectSkill("web-fetch", "Project web-fetch override");
+    createSettingsWithPackage(pkgDir, "user");
+    const loader = new __vite_ssr_import_4__.DefaultResourceLoader({ cwd, agentDir });
+    await loader.reload();
+    const { skills } = loader.getSkills();
+    const webFetch = skills.find((s) => s.name === "web-fetch");
+    (0,__vite_ssr_import_3__.expect)(webFetch).toBeDefined();
+    (0,__vite_ssr_import_3__.expect)(webFetch.filePath).toBe(projectSkillPath);
+    (0,__vite_ssr_import_3__.expect)(webFetch.description).toBe("Project web-fetch override");
+  });
+  (0,__vite_ssr_import_3__.it)("project skill should override user skill which should override package skill", async () => {
+    const pkgDir = createPackageWithSkill("web-fetch", "Package web-fetch skill");
+    createUserSkill("web-fetch", "User web-fetch override");
+    const projectSkillPath = createProjectSkill("web-fetch", "Project web-fetch override");
+    createSettingsWithPackage(pkgDir, "user");
+    const loader = new __vite_ssr_import_4__.DefaultResourceLoader({ cwd, agentDir });
+    await loader.reload();
+    const { skills } = loader.getSkills();
+    const webFetch = skills.find((s) => s.name === "web-fetch");
+    (0,__vite_ssr_import_3__.expect)(webFetch).toBeDefined();
+    (0,__vite_ssr_import_3__.expect)(webFetch.filePath).toBe(projectSkillPath);
+    (0,__vite_ssr_import_3__.expect)(webFetch.description).toBe("Project web-fetch override");
+  });
+  (0,__vite_ssr_import_3__.it)("collision diagnostics should report package skill as loser when user skill wins", async () => {
+    const pkgDir = createPackageWithSkill("web-fetch", "Package web-fetch skill");
+    createUserSkill("web-fetch", "User web-fetch override");
+    createSettingsWithPackage(pkgDir, "user");
+    const loader = new __vite_ssr_import_4__.DefaultResourceLoader({ cwd, agentDir });
+    await loader.reload();
+    const { diagnostics } = loader.getSkills();
+    const collision = diagnostics.find((d) => d.type === "collision" && d.collision?.name === "web-fetch");
+    (0,__vite_ssr_import_3__.expect)(collision).toBeDefined();
+    (0,__vite_ssr_import_3__.expect)(collision.collision.loserPath).toContain("fake-package");
+  });
+});
+
+//# sourceMappingSource=vite-node
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,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QVcsRUFBRSxLQUFLLDRCQUE0QjtBQUFBLEVBQ2hFLENBQUM7QUFFRCwrQkFBRyxtRkFBbUYsWUFBWTtBQUNqRyxVQUFNLFNBQVMsdUJBQXVCLGFBQWEseUJBQXlCO0FBQzVFLG9CQUFnQixhQUFhLHlCQUF5QjtBQUN0RCw4QkFBMEIsUUFBUSxNQUFNO0FBRXhDLFVBQU0sU0FBUyxJQUFJLDRDQUFzQixFQUFFLEtBQUssU0FBUyxDQUFDO0FBQzFELFVBQU0sT0FBTyxPQUFPO0FBRXBCLFVBQU0sRUFBRSxZQUFZLElBQUksT0FBTyxVQUFVO0FBQ3pDLFVBQU0sWUFBWSxZQUFZLEtBQUssQ0FBQyxNQUFNLEVBQUUsU0FBUyxlQUFlLEVBQUUsV0FBVyxTQUFTLFdBQVc7QUFDckcscUNBQU8sU0FBUyxFQUFFLFlBQVk7QUFDOUIscUNBQU8sVUFBVyxVQUFXLFNBQVMsRUFBRSxVQUFVLGNBQWM7QUFBQSxFQUNqRSxDQUFDO0FBQ0YsQ0FBQyIsIm5hbWVzIjpbXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiMjc4MS1za2lsbC1jb2xsaXNpb24tcHJlY2VkZW5jZS50ZXN0LnRzIl0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IG1rZGlyU3luYywgcm1TeW5jLCB3cml0ZUZpbGVTeW5jIH0gZnJvbSBcIm5vZGU6ZnNcIjtcbmltcG9ydCB7IHRtcGRpciB9IGZyb20gXCJub2RlOm9zXCI7XG5pbXBvcnQgeyBqb2luIH0gZnJvbSBcIm5vZGU6cGF0aFwiO1xuaW1wb3J0IHsgYWZ0ZXJFYWNoLCBiZWZvcmVFYWNoLCBkZXNjcmliZSwgZXhwZWN0LCBpdCB9IGZyb20gXCJ2aXRlc3RcIjtcbmltcG9ydCB7IERlZmF1bHRSZXNvdXJjZUxvYWRlciB9IGZyb20gXCIuLi8uLi8uLi9zcmMvY29yZS9yZXNvdXJjZS1sb2FkZXIudHNcIjtcblxuZGVzY3JpYmUoXCJpc3N1ZSAjMjc4MSBza2lsbCBjb2xsaXNpb24gcHJlY2VkZW5jZTogdXNlciBza2lsbHMgc2hvdWxkIG92ZXJyaWRlIHBhY2thZ2Ugc2tpbGxzXCIsICgpID0+IHtcblx0bGV0IHRlbXBEaXI6IHN0cmluZztcblx0bGV0IGFnZW50RGlyOiBzdHJpbmc7XG5cdGxldCBjd2Q6IHN0cmluZztcblxuXHRiZWZvcmVFYWNoKCgpID0+IHtcblx0XHR0ZW1wRGlyID0gam9pbih0bXBkaXIoKSwgYHBpLTI3ODEtJHtEYXRlLm5vdygpfS0ke01hdGgucmFuZG9tKCkudG9TdHJpbmcoMzYpLnNsaWNlKDIpfWApO1xuXHRcdGFnZW50RGlyID0gam9pbih0ZW1wRGlyLCBcImFnZW50XCIpO1xuXHRcdGN3ZCA9IGpvaW4odGVtcERpciwgXCJwcm9qZWN0XCIpO1xuXHRcdG1rZGlyU3luYyhhZ2VudERpciwgeyByZWN1cnNpdmU6IHRydWUgfSk7XG5cdFx0bWtkaXJTeW5jKGN3ZCwgeyByZWN1cnNpdmU6IHRydWUgfSk7XG5cdH0pO1xuXG5cdGFmdGVyRWFjaCgoKSA9PiB7XG5cdFx0cm1TeW5jKHRlbXBEaXIsIHsgcmVjdXJzaXZlOiB0cnVlLCBmb3JjZTogdHJ1ZSB9KTtcblx0fSk7XG5cblx0ZnVuY3Rpb24gY3JlYXRlUGFja2FnZVdpdGhTa2lsbChuYW1lOiBzdHJpbmcsIGRlc2NyaXB0aW9uOiBzdHJpbmcpOiBzdHJpbmcge1xuXHRcdGNvbnN0IHBrZ0RpciA9IGpvaW4odGVtcERpciwgYGZha2UtcGFja2FnZS0ke25hbWV9YCk7XG5cdFx0Y29uc3Qgc2tpbGxEaXIgPSBqb2luKHBrZ0RpciwgXCJza2lsbHNcIiwgbmFtZSk7XG5cdFx0bWtkaXJTeW5jKHNraWxsRGlyLCB7IHJlY3Vyc2l2ZTogdHJ1ZSB9KTtcblx0XHR3cml0ZUZpbGVTeW5jKFxuXHRcdFx0am9pbihwa2dEaXIsIFwicGFja2FnZS5qc29uXCIpLFxuXHRcdFx0SlNPTi5zdHJpbmdpZnkoeyBuYW1lOiBgZmFrZS1wa2ctJHtuYW1lfWAsIHZlcnNpb246IFwiMS4wLjBcIiwgcGk6IHsgc2tpbGxzOiBbYHNraWxscy8ke25hbWV9YF0gfSB9LCBudWxsLCAyKSxcblx0XHQpO1xuXHRcdHdyaXRlRmlsZVN5bmMoXG5cdFx0XHRqb2luKHNraWxsRGlyLCBcIlNLSUxMLm1kXCIpLFxuXHRcdFx0YC0tLVxcbm5hbWU6ICR7bmFtZX1cXG5kZXNjcmlwdGlvbjogJHtkZXNjcmlwdGlvbn1cXG4tLS1cXG5QYWNrYWdlIHNraWxsIGNvbnRlbnRgLFxuXHRcdCk7XG5cdFx0cmV0dXJuIHBrZ0Rpcjtcblx0fVxuXG5cdGZ1bmN0aW9uIGNyZWF0ZVVzZXJTa2lsbChuYW1lOiBzdHJpbmcsIGRlc2NyaXB0aW9uOiBzdHJpbmcpOiBzdHJpbmcge1xuXHRcdGNvbnN0IHNraWxsRGlyID0gam9pbihhZ2VudERpciwgXCJza2lsbHNcIiwgbmFtZSk7XG5cdFx0bWtkaXJTeW5jKHNraWxsRGlyLCB7IHJlY3Vyc2l2ZTogdHJ1ZSB9KTtcblx0XHRjb25zdCBza2lsbFBhdGggPSBqb2luKHNraWxsRGlyLCBcIlNLSUxMLm1kXCIpO1xuXHRcdHdyaXRlRmlsZVN5bmMoc2tpbGxQYXRoLCBgLS0tXFxubmFtZTogJHtuYW1lfVxcbmRlc2NyaXB0aW9uOiAke2Rlc2NyaXB0aW9ufVxcbi0tLVxcblVzZXIgc2tpbGwgY29udGVudGApO1xuXHRcdHJldHVybiBza2lsbFBhdGg7XG5cdH1cblxuXHRmdW5jdGlvbiBjcmVhdGVQcm9qZWN0U2tpbGwobmFtZTogc3RyaW5nLCBkZXNjcmlwdGlvbjogc3RyaW5nKTogc3RyaW5nIHtcblx0XHRjb25zdCBza2lsbERpciA9IGpvaW4oY3dkLCBcIi5waVwiLCBcInNraWxsc1wiLCBuYW1lKTtcblx0XHRta2RpclN5bmMoc2tpbGxEaXIsIHsgcmVjdXJzaXZlOiB0cnVlIH0pO1xuXHRcdGNvbnN0IHNraWxsUGF0aCA9IGpvaW4oc2tpbGxEaXIsIFwiU0tJTEwubWRcIik7XG5cdFx0d3JpdGVGaWxlU3luYyhza2lsbFBhdGgsIGAtLS1cXG5uYW1lOiAke25hbWV9XFxuZGVzY3JpcHRpb246ICR7ZGVzY3JpcHRpb259XFxuLS0tXFxuUHJvamVjdCBza2lsbCBjb250ZW50YCk7XG5cdFx0cmV0dXJuIHNraWxsUGF0aDtcblx0fVxuXG5cdGZ1bmN0aW9uIGNyZWF0ZVNldHRpbmdzV2l0aFBhY2thZ2UocGtnRGlyOiBzdHJpbmcsIHNjb3BlOiBcInVzZXJcIiB8IFwicHJvamVjdFwiKTogdm9pZCB7XG5cdFx0Y29uc3Qgc2V0dGluZ3NEaXIgPSBzY29wZSA9PT0gXCJ1c2VyXCIgPyBhZ2VudERpciA6IGpvaW4oY3dkLCBcIi5waVwiKTtcblx0XHRta2RpclN5bmMoc2V0dGluZ3NEaXIsIHsgcmVjdXJzaXZlOiB0cnVlIH0pO1xuXHRcdHdyaXRlRmlsZVN5bmMoam9pbihzZXR0aW5nc0RpciwgXCJzZXR0aW5ncy5qc29uXCIpLCBKU09OLnN0cmluZ2lmeSh7IHBhY2thZ2VzOiBbcGtnRGlyXSB9LCBudWxsLCAyKSk7XG5cdH1cblxuXHRpdChcInVzZXIgYXV0by1kaXNjb3ZlcmVkIHNraWxsIHNob3VsZCBvdmVycmlkZSBwYWNrYWdlIHNraWxsIHdpdGggc2FtZSBuYW1lXCIsIGFzeW5jICgpID0+IHtcblx0XHRjb25zdCBwa2dEaXIgPSBjcmVhdGVQYWNrYWdlV2l0aFNraWxsKFwid2ViLWZldGNoXCIsIFwiUGFja2FnZSB3ZWItZmV0Y2ggc2tpbGxcIik7XG5cdFx0Y29uc3QgdXNlclNraWxsUGF0aCA9IGNyZWF0ZVVzZXJTa2lsbChcIndlYi1mZXRjaFwiLCBcIlVzZXIgd2ViLWZldGNoIG92ZXJyaWRlXCIpO1xuXHRcdGNyZWF0ZVNldHRpbmdzV2l0aFBhY2thZ2UocGtnRGlyLCBcInVzZXJcIik7XG5cblx0XHRjb25zdCBsb2FkZXIgPSBuZXcgRGVmYXVsdFJlc291cmNlTG9hZGVyKHsgY3dkLCBhZ2VudERpciB9KTtcblx0XHRhd2FpdCBsb2FkZXIucmVsb2FkKCk7XG5cblx0XHRjb25zdCB7IHNraWxscyB9ID0gbG9hZGVyLmdldFNraWxscygpO1xuXHRcdGNvbnN0IHdlYkZldGNoID0gc2tpbGxzLmZpbmQoKHMpID0+IHMubmFtZSA9PT0gXCJ3ZWItZmV0Y2hcIik7XG5cdFx0ZXhwZWN0KHdlYkZldGNoKS50b0JlRGVmaW5lZCgpO1xuXHRcdGV4cGVjdCh3ZWJGZXRjaCEuZmlsZVBhdGgpLnRvQmUodXNlclNraWxsUGF0aCk7XG5cdFx0ZXhwZWN0KHdlYkZldGNoIS5kZXNjcmlwdGlvbikudG9CZShcIlVzZXIgd2ViLWZldGNoIG92ZXJyaWRlXCIpO1xuXHR9KTtcblxuXHRpdChcInByb2plY3QgYXV0by1kaXNjb3ZlcmVkIHNraWxsIHNob3VsZCBvdmVycmlkZSBwYWNrYWdlIHNraWxsIHdpdGggc2FtZSBuYW1lXCIsIGFzeW5jICgpID0+IHtcblx0XHRjb25zdCBwa2dEaXIgPSBjcmVhdGVQYWNrYWdlV2l0aFNraWxsKFwid2ViLWZldGNoXCIsIFwiUGFja2FnZSB3ZWItZmV0Y2ggc2tpbGxcIik7XG5cdFx0Y29uc3QgcHJvamVjdFNraWxsUGF0aCA9IGNyZWF0ZVByb2plY3RTa2lsbChcIndlYi1mZXRjaFwiLCBcIlByb2plY3Qgd2ViLWZldGNoIG92ZXJyaWRlXCIpO1xuXHRcdGNyZWF0ZVNldHRpbmdzV2l0aFBhY2thZ2UocGtnRGlyLCBcInVzZXJcIik7XG5cblx0XHRjb25zdCBsb2FkZXIgPSBuZXcgRGVmYXVsdFJlc291cmNlTG9hZGVyKHsgY3dkLCBhZ2VudERpciB9KTtcblx0XHRhd2FpdCBsb2FkZXIucmVsb2FkKCk7XG5cblx0XHRjb25zdCB7IHNraWxscyB9ID0gbG9hZGVyLmdldFNraWxscygpO1xuXHRcdGNvbnN0IHdlYkZldGNoID0gc2tpbGxzLmZpbmQoKHMpID0+IHMubmFtZSA9PT0gXCJ3ZWItZmV0Y2hcIik7XG5cdFx0ZXhwZWN0KHdlYkZldGNoKS50b0JlRGVmaW5lZCgpO1xuXHRcdGV4cGVjdCh3ZWJGZXRjaCEuZmlsZVBhdGgpLnRvQmUocHJvamVjdFNraWxsUGF0aCk7XG5cdFx0ZXhwZWN0KHdlYkZldGNoIS5kZXNjcmlwdGlvbikudG9CZShcIlByb2plY3Qgd2ViLWZldGNoIG92ZXJyaWRlXCIpO1xuXHR9KTtcblxuXHRpdChcInByb2plY3Qgc2tpbGwgc2hvdWxkIG92ZXJyaWRlIHVzZXIgc2tpbGwgd2hpY2ggc2hvdWxkIG92ZXJyaWRlIHBhY2thZ2Ugc2tpbGxcIiwgYXN5bmMgKCkgPT4ge1xuXHRcdGNvbnN0IHBrZ0RpciA9IGNyZWF0ZVBhY2thZ2VXaXRoU2tpbGwoXCJ3ZWItZmV0Y2hcIiwgXCJQYWNrYWdlIHdlYi1mZXRjaCBza2lsbFwiKTtcblx0XHRjcmVhdGVVc2VyU2tpbGwoXCJ3ZWItZmV0Y2hcIiwgXCJVc2VyIHdlYi1mZXRjaCBvdmVycmlkZVwiKTtcblx0XHRjb25zdCBwcm9qZWN0U2tpbGxQYXRoID0gY3JlYXRlUHJvamVjdFNraWxsKFwid2ViLWZldGNoXCIsIFwiUHJvamVjdCB3ZWItZmV0Y2ggb3ZlcnJpZGVcIik7XG5cdFx0Y3JlYXRlU2V0dGluZ3NXaXRoUGFja2FnZShwa2dEaXIsIFwidXNlclwiKTtcblxuXHRcdGNvbnN0IGxvYWRlciA9IG5ldyBEZWZhdWx0UmVzb3VyY2VMb2FkZXIoeyBjd2QsIGFnZW50RGlyIH0pO1xuXHRcdGF3YWl0IGxvYWRlci5yZWxvYWQoKTtcblxuXHRcdGNvbnN0IHsgc2tpbGxzIH0gPSBsb2FkZXIuZ2V0U2tpbGxzKCk7XG5cdFx0Y29uc3Qgd2ViRmV0Y2ggPSBza2lsbHMuZmluZCgocykgPT4gcy5uYW1lID09PSBcIndlYi1mZXRjaFwiKTtcblx0XHRleHBlY3Qod2ViRmV0Y2gpLnRvQmVEZWZpbmVkKCk7XG5cdFx0ZXhwZWN0KHdlYkZldGNoIS5maWxlUGF0aCkudG9CZShwcm9qZWN0U2tpbGxQYXRoKTtcblx0XHRleHBlY3Qod2ViRmV0Y2ghLmRlc2NyaXB0aW9uKS50b0JlKFwiUHJvamVjdCB3ZWItZmV0Y2ggb3ZlcnJpZGVcIik7XG5cdH0pO1xuXG5cdGl0KFwiY29sbGlzaW9uIGRpYWdub3N0aWNzIHNob3VsZCByZXBvcnQgcGFja2FnZSBza2lsbCBhcyBsb3NlciB3aGVuIHVzZXIgc2tpbGwgd2luc1wiLCBhc3luYyAoKSA9PiB7XG5cdFx0Y29uc3QgcGtnRGlyID0gY3JlYXRlUGFja2FnZVdpdGhTa2lsbChcIndlYi1mZXRjaFwiLCBcIlBhY2thZ2Ugd2ViLWZldGNoIHNraWxsXCIpO1xuXHRcdGNyZWF0ZVVzZXJTa2lsbChcIndlYi1mZXRjaFwiLCBcIlVzZXIgd2ViLWZldGNoIG92ZXJyaWRlXCIpO1xuXHRcdGNyZWF0ZVNldHRpbmdzV2l0aFBhY2thZ2UocGtnRGlyLCBcInVzZXJcIik7XG5cblx0XHRjb25zdCBsb2FkZXIgPSBuZXcgRGVmYXVsdFJlc291cmNlTG9hZGVyKHsgY3dkLCBhZ2VudERpciB9KTtcblx0XHRhd2FpdCBsb2FkZXIucmVsb2FkKCk7XG5cblx0XHRjb25zdCB7IGRpYWdub3N0aWNzIH0gPSBsb2FkZXIuZ2V0U2tpbGxzKCk7XG5cdFx0Y29uc3QgY29sbGlzaW9uID0gZGlhZ25vc3RpY3MuZmluZCgoZCkgPT4gZC50eXBlID09PSBcImNvbGxpc2lvblwiICYmIGQuY29sbGlzaW9uPy5uYW1lID09PSBcIndlYi1mZXRjaFwiKTtcblx0XHRleHBlY3QoY29sbGlzaW9uKS50b0JlRGVmaW5lZCgpO1xuXHRcdGV4cGVjdChjb2xsaXNpb24hLmNvbGxpc2lvbiEubG9zZXJQYXRoKS50b0NvbnRhaW4oXCJmYWtlLXBhY2thZ2VcIik7XG5cdH0pO1xufSk7XG4iXSwiZmlsZSI6Ikc6L2gtMHgvcGkvcGFja2FnZXMvY29kaW5nLWFnZW50L3Rlc3Qvc3VpdGUvcmVncmVzc2lvbnMvMjc4MS1za2lsbC1jb2xsaXNpb24tcHJlY2VkZW5jZS50ZXN0LnRzIn0=

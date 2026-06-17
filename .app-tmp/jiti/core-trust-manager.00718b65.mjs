@@ -1,0 +1,244 @@
+"use strict";Object.defineProperty(exports, "__esModule", { value: true });exports.ProjectTrustStore = void 0;exports.getProjectTrustOptions = getProjectTrustOptions;exports.getProjectTrustParentPath = getProjectTrustParentPath;exports.hasTrustRequiringProjectResources = hasTrustRequiringProjectResources;var _nodeFs = await jitiImport("node:fs");
+var _nodeOs = await jitiImport("node:os");
+var _nodePath = await jitiImport("node:path");
+var _properLockfile = _interopRequireDefault(await jitiImport("proper-lockfile"));
+var _config = await jitiImport("../config.ts");
+var _paths = await jitiImport("../utils/paths.ts");function _interopRequireDefault(e) {return e && e.__esModule ? e : { default: e };}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES = [
+"settings.json",
+"extensions",
+"skills",
+"prompts",
+"themes",
+"SYSTEM.md",
+"APPEND_SYSTEM.md"];
+
+
+function normalizeCwd(cwd) {
+  return (0, _paths.canonicalizePath)((0, _paths.resolvePath)(cwd));
+}
+
+function findNearestTrustEntry(data, cwd) {
+  let currentDir = normalizeCwd(cwd);
+  while (true) {
+    const value = data[currentDir];
+    if (value === true || value === false) {
+      return { path: currentDir, decision: value };
+    }
+
+    const parentDir = (0, _nodePath.dirname)(currentDir);
+    if (parentDir === currentDir) {
+      return null;
+    }
+    currentDir = parentDir;
+  }
+}
+
+function getProjectTrustParentPath(cwd) {
+  const trustPath = normalizeCwd(cwd);
+  const parentDir = (0, _nodePath.dirname)(trustPath);
+  return parentDir === trustPath ? undefined : parentDir;
+}
+
+function getProjectTrustOptions(cwd, options) {
+  const trustPath = normalizeCwd(cwd);
+  const trustOptions = [
+  { label: "Trust", trusted: true, updates: [{ path: trustPath, decision: true }], savedPath: trustPath }];
+
+  const parentPath = getProjectTrustParentPath(cwd);
+  if (parentPath !== undefined) {
+    trustOptions.push({
+      label: `Trust parent folder (${parentPath})`,
+      trusted: true,
+      updates: [
+      { path: parentPath, decision: true },
+      { path: trustPath, decision: null }],
+
+      savedPath: parentPath
+    });
+  }
+  if (options?.includeSessionOnly) {
+    trustOptions.push({ label: "Trust (this session only)", trusted: true, updates: [] });
+  }
+  trustOptions.push({
+    label: "Do not trust",
+    trusted: false,
+    updates: [{ path: trustPath, decision: false }],
+    savedPath: trustPath
+  });
+  if (options?.includeSessionOnly) {
+    trustOptions.push({ label: "Do not trust (this session only)", trusted: false, updates: [] });
+  }
+  return trustOptions;
+}
+
+function readTrustFile(path) {
+  if (!(0, _nodeFs.existsSync)(path)) {
+    return {};
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse((0, _nodeFs.readFileSync)(path, "utf-8"));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read trust store ${path}: ${message}`);
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid trust store ${path}: expected an object`);
+  }
+
+  const data = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value !== true && value !== false && value !== null) {
+      throw new Error(`Invalid trust store ${path}: value for ${JSON.stringify(key)} must be true, false, or null`);
+    }
+    data[key] = value;
+  }
+  return data;
+}
+
+function writeTrustFile(path, data) {
+  const sorted = {};
+  for (const key of Object.keys(data).sort()) {
+    const value = data[key];
+    if (value === true || value === false || value === null) {
+      sorted[key] = value;
+    }
+  }
+  (0, _nodeFs.mkdirSync)((0, _nodePath.dirname)(path), { recursive: true });
+  (0, _nodeFs.writeFileSync)(path, `${JSON.stringify(sorted, null, 2)}\n`, "utf-8");
+}
+
+function acquireTrustLockSync(path) {
+  const trustDir = (0, _nodePath.dirname)(path);
+  (0, _nodeFs.mkdirSync)(trustDir, { recursive: true });
+  const maxAttempts = 10;
+  const delayMs = 20;
+  let lastError;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return _properLockfile.default.lockSync(trustDir, { realpath: false, lockfilePath: `${path}.lock` });
+    } catch (error) {
+      const code =
+      typeof error === "object" && error !== null && "code" in error ?
+      String(error.code) :
+      undefined;
+      if (code !== "ELOCKED" || attempt === maxAttempts) {
+        throw error;
+      }
+      lastError = error;
+      const start = Date.now();
+      while (Date.now() - start < delayMs) {
+
+        // Sleep synchronously to avoid changing trust store callers to async.
+      }}
+  }
+
+  if (lastError instanceof Error) {
+    throw lastError;
+  }
+  throw new Error("Failed to acquire trust store lock");
+}
+
+function withTrustFileLock(path, fn) {
+  const release = acquireTrustLockSync(path);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Returns true when cwd has project-local resources that must be gated by
+ * project trust: trust-requiring entries under cwd/.pi, or .agents/skills in
+ * cwd or one of its ancestors. Returns false when no such project resources
+ * exist. The user/global ~/.agents/skills directory is always treated as a
+ * trusted user resource and is ignored here, even when cwd is $HOME.
+ */
+function hasTrustRequiringProjectResources(cwd) {
+  const homeDir = (0, _paths.canonicalizePath)((0, _paths.resolvePath)(process.env.HOME || (0, _nodeOs.homedir)()));
+  const userAgentsSkillsDir = (0, _nodePath.join)(homeDir, ".agents", "skills");
+  let currentDir = (0, _paths.canonicalizePath)((0, _paths.resolvePath)(cwd));
+
+  const configDir = (0, _nodePath.join)(currentDir, _config.CONFIG_DIR_NAME);
+  if (TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES.some((entry) => (0, _nodeFs.existsSync)((0, _nodePath.join)(configDir, entry)))) {
+    return true;
+  }
+
+  while (true) {
+    const agentsSkillsDir = (0, _nodePath.join)(currentDir, ".agents", "skills");
+    if (agentsSkillsDir !== userAgentsSkillsDir && (0, _nodeFs.existsSync)(agentsSkillsDir)) {
+      return true;
+    }
+
+    const parentDir = (0, _nodePath.dirname)(currentDir);
+    if (parentDir === currentDir) {
+      return false;
+    }
+    currentDir = parentDir;
+  }
+}
+
+class ProjectTrustStore {
+  trustPath;
+
+  constructor(agentDir) {
+    this.trustPath = (0, _nodePath.join)((0, _paths.resolvePath)(agentDir), "trust.json");
+  }
+
+  get(cwd) {
+    return this.getEntry(cwd)?.decision ?? null;
+  }
+
+  getEntry(cwd) {
+    return withTrustFileLock(this.trustPath, () => {
+      const data = readTrustFile(this.trustPath);
+      return findNearestTrustEntry(data, cwd);
+    });
+  }
+
+  set(cwd, decision) {
+    this.setMany([{ path: cwd, decision }]);
+  }
+
+  setMany(decisions) {
+    withTrustFileLock(this.trustPath, () => {
+      const data = readTrustFile(this.trustPath);
+      for (const { path, decision } of decisions) {
+        const key = normalizeCwd(path);
+        if (decision === null) {
+          delete data[key];
+        } else {
+          data[key] = decision;
+        }
+      }
+      writeTrustFile(this.trustPath, data);
+    });
+  }
+}exports.ProjectTrustStore = ProjectTrustStore; /* v9-ae1f5dad7d696287 */

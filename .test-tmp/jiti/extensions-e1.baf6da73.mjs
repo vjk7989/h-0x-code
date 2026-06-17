@@ -1,0 +1,1 @@
+"use strict";Object.defineProperty(exports, "__esModule", { value: true });exports.default = void 0;var _default = (p) => p.on("input", async () => {globalThis.testVar = true;});exports.default = _default; /* v9-407cd51442d68776 */
