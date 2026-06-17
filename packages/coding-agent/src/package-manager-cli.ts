@@ -14,6 +14,7 @@ import {
 	type SelfUpdateCommand,
 	VERSION,
 } from "./config.ts";
+import { AuthStorage } from "./core/auth-storage.ts";
 import type { ExtensionFactory } from "./core/extensions/types.ts";
 import {
 	deleteH0xAgentFile,
@@ -1342,6 +1343,16 @@ function maskProvidersConfig(providers: H0xProvidersConfig): H0xProvidersConfig 
 	return Object.fromEntries(Object.entries(providers).map(([name, config]) => [name, maskProviderConfig(config)]));
 }
 
+function getH0xProviderAuthProvider(provider: string): string | undefined {
+	if (provider === "gemini") {
+		return "google";
+	}
+	if (provider === "ollama") {
+		return undefined;
+	}
+	return provider;
+}
+
 function parseProviderAddOptions(args: string[]): {
 	provider?: string;
 	config: H0xProviderConfig;
@@ -1407,6 +1418,10 @@ export function handleProviderCommand(args: string[]): boolean {
 				}
 				const config = addH0xProviderConfig(paths.global, parsed.provider, parsed.config);
 				const providerConfig = getH0xConfigValue(config, `providers.${parsed.provider.toLowerCase()}`);
+				const authProvider = getH0xProviderAuthProvider(parsed.provider.toLowerCase());
+				if (authProvider && parsed.config.apiKey) {
+					AuthStorage.create().set(authProvider, { type: "api_key", key: parsed.config.apiKey });
+				}
 				console.log(formatH0xConfigValue(maskProviderConfig(providerConfig as H0xProviderConfig)));
 				return true;
 			}
@@ -1417,7 +1432,11 @@ export function handleProviderCommand(args: string[]): boolean {
 					process.exitCode = 1;
 					return true;
 				}
+				const authProvider = getH0xProviderAuthProvider(args[2].toLowerCase());
 				removeH0xProviderConfig(paths.global, args[2]);
+				if (authProvider) {
+					AuthStorage.create().remove(authProvider);
+				}
 				console.log(chalk.green(`Removed provider ${args[2].toLowerCase()}.`));
 				return true;
 			}
@@ -1604,10 +1623,13 @@ export function handleSetupCommand(args: string[]): boolean {
 	printH0xProjectInitSummary();
 	console.log("");
 	console.log(chalk.bold("Next steps"));
-	console.log(`1. Use Pi-compatible free/default models when available: ${APP_NAME} --list-models`);
-	console.log(`2. Optional BYOK: ${APP_NAME} provider add openrouter --api-key <key> --model <model>`);
-	console.log(`3. Configure MCP servers: ${APP_NAME} mcp add github --command <command>`);
-	console.log(`4. Run an agent: ${APP_NAME} @fullstack "describe the next task"`);
+	console.log(`1. Use Pi-compatible free/default models when auth is present: ${APP_NAME} --list-models`);
+	console.log(
+		`2. Add OpenCode free-route auth: ${APP_NAME} provider add opencode --api-key <token> --model kimi-k2.6`,
+	);
+	console.log(`3. Optional BYOK: ${APP_NAME} provider add openrouter --api-key <key> --model <model>`);
+	console.log(`4. Configure MCP servers: ${APP_NAME} mcp add github --command <command>`);
+	console.log(`5. Run an agent: ${APP_NAME} @fullstack "describe the next task"`);
 	return true;
 }
 

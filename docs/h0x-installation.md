@@ -10,6 +10,32 @@ h0x --version
 h0x --help
 ```
 
+Run without a global install:
+
+```bash
+npx -y @hyper-0x/h0x-code@latest --help
+npx -y @hyper-0x/h0x-code@latest setup
+```
+
+## Bun
+
+Install globally with Bun:
+
+```bash
+bun add -g @hyper-0x/h0x-code
+h0x --version
+h0x --help
+```
+
+Run without a global install:
+
+```bash
+bunx @hyper-0x/h0x-code@latest --help
+bunx @hyper-0x/h0x-code@latest setup
+```
+
+The same npm, npx, Bun, and bunx commands work on macOS, Linux, and Windows when Node.js 22.19+ or Bun is installed.
+
 The monorepo keeps internal workspace package names stable during development to avoid breaking local tests and release tooling.
 
 ## Installer Scripts
@@ -43,10 +69,17 @@ h0x setup
 
 ## Models
 
-H-0x keeps Pi-compatible free/default model routes available when the local install can discover them:
+H-0x keeps Pi-compatible free/default model routes available when the local install can discover auth for them:
 
 ```bash
 h0x --list-models
+```
+
+For OpenCode free-route models, add an OpenCode token first:
+
+```bash
+h0x provider add opencode --api-key <token> --model kimi-k2.6
+h0x --list-models opencode
 ```
 
 Users can configure their own keys with BYOK:

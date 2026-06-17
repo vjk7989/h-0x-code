@@ -9,10 +9,13 @@ describe("H-0x installer and VS Code plan docs", () => {
 		const docs = readFileSync(join(repoRoot, "docs", "h0x-installation.md"), "utf-8");
 
 		expect(docs).toContain("@hyper-0x/h0x-code");
+		expect(docs).toContain("npx -y @hyper-0x/h0x-code@latest");
+		expect(docs).toContain("bunx @hyper-0x/h0x-code@latest");
 		expect(docs).toContain("h0x --version");
 		expect(docs).toContain("h0x --help");
 		expect(docs).toContain("h0x --list-models");
 		expect(docs).toContain("BYOK");
+		expect(docs).toContain("provider add opencode");
 	});
 
 	it("documents free model access without shipping shared tokens", () => {
@@ -20,6 +23,9 @@ describe("H-0x installer and VS Code plan docs", () => {
 
 		expect(docs).toContain("Pi-compatible model access");
 		expect(docs).toContain("h0x --list-models");
+		expect(docs).toContain("h0x provider add opencode");
+		expect(docs).toContain("npx -y @hyper-0x/h0x-code@latest");
+		expect(docs).toContain("bunx @hyper-0x/h0x-code@latest");
 		expect(docs).toContain("BYOK");
 		expect(docs).toContain("Do not embed shared provider tokens");
 		expect(docs).toContain("server-side gateway");

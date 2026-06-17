@@ -57,7 +57,15 @@ export const DEFAULT_H0X_CONFIG: H0xConfig = {
 	telemetry: false,
 };
 
-export const SUPPORTED_H0X_PROVIDER_NAMES = ["openai", "anthropic", "gemini", "openrouter", "ollama"] as const;
+export const SUPPORTED_H0X_PROVIDER_NAMES = [
+	"openai",
+	"anthropic",
+	"gemini",
+	"openrouter",
+	"ollama",
+	"opencode",
+	"opencode-go",
+] as const;
 
 const CONFIG_KEYS = new Set<string>(["defaultModel", "providers", "agentsDir", "mcpServers", "telemetry"]);
 const OBJECT_KEYS = new Set<string>(["providers", "mcpServers"]);

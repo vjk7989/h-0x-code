@@ -55,6 +55,7 @@ describe("H-0x init and setup commands", () => {
 		expect(joined).toContain("Next steps");
 		expect(joined).toContain("free/default models");
 		expect(joined).toContain("--list-models");
+		expect(joined).toContain("provider add opencode");
 		expect(joined).toContain("Optional BYOK");
 		expect(joined).toContain("provider add");
 		expect(joined).toContain("mcp add github");
