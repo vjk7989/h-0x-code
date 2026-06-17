@@ -1604,9 +1604,10 @@ export function handleSetupCommand(args: string[]): boolean {
 	printH0xProjectInitSummary();
 	console.log("");
 	console.log(chalk.bold("Next steps"));
-	console.log(`1. Configure a provider: ${APP_NAME} provider add openai --api-key <key> --model <model>`);
-	console.log(`2. Configure MCP servers: ${APP_NAME} mcp add github --command <command>`);
-	console.log(`3. Run an agent: ${APP_NAME} @fullstack "describe the next task"`);
+	console.log(`1. Use Pi-compatible free/default models when available: ${APP_NAME} --list-models`);
+	console.log(`2. Optional BYOK: ${APP_NAME} provider add openrouter --api-key <key> --model <model>`);
+	console.log(`3. Configure MCP servers: ${APP_NAME} mcp add github --command <command>`);
+	console.log(`4. Run an agent: ${APP_NAME} @fullstack "describe the next task"`);
 	return true;
 }
 

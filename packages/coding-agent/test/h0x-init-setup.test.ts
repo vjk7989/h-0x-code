@@ -53,6 +53,9 @@ describe("H-0x init and setup commands", () => {
 
 		const joined = output.join("\n");
 		expect(joined).toContain("Next steps");
+		expect(joined).toContain("free/default models");
+		expect(joined).toContain("--list-models");
+		expect(joined).toContain("Optional BYOK");
 		expect(joined).toContain("provider add");
 		expect(joined).toContain("mcp add github");
 	});

@@ -40,3 +40,19 @@ h0x --version
 h0x --help
 h0x setup
 ```
+
+## Models
+
+H-0x keeps Pi-compatible free/default model routes available when the local install can discover them:
+
+```bash
+h0x --list-models
+```
+
+Users can configure their own keys with BYOK:
+
+```bash
+h0x provider add openrouter --api-key <key> --model <model>
+```
+
+See [H-0x Free Models And BYOK](./h0x-free-models-and-byok.md) for the token handling policy.
