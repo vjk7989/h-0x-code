@@ -34,11 +34,17 @@ describe("H-0x installer and VS Code plan docs", () => {
 	it("provides installer dry-run scripts", () => {
 		const shellScript = readFileSync(join(repoRoot, "scripts", "install.sh"), "utf-8");
 		const powershellScript = readFileSync(join(repoRoot, "scripts", "install.ps1"), "utf-8");
+		const h0xTestScript = readFileSync(join(repoRoot, "h0x-test.ps1"), "utf-8");
 
 		expect(shellScript).toContain("--dry-run");
 		expect(shellScript).toContain("npm install -g");
 		expect(powershellScript).toContain("$DryRun");
 		expect(powershellScript).toContain("npm install -g");
+		expect(h0xTestScript).toContain(".test-home\\.pi\\agent");
+		expect(h0xTestScript).toContain(".pi\\agent");
+		expect(h0xTestScript).toContain("auth.json");
+		expect(h0xTestScript).toContain("models.json");
+		expect(h0xTestScript).toContain("settings.json");
 	});
 
 	it("adds a VS Code extension plan without extension source", () => {

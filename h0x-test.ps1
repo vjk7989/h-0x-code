@@ -8,8 +8,8 @@ $env:TEMP = Join-Path $repoRoot ".test-tmp"
 $env:TMP = Join-Path $repoRoot ".test-tmp"
 $env:HOME = Join-Path $repoRoot ".test-home"
 $env:H0X_CONFIG_HOME = Join-Path $repoRoot ".test-home"
-$env:H0X_CODING_AGENT_DIR = Join-Path $repoRoot ".test-home\.h0x\agent"
-$env:H0X_CODING_AGENT_SESSION_DIR = Join-Path $repoRoot ".test-home\.h0x\sessions"
+$env:H0X_CODING_AGENT_DIR = Join-Path $repoRoot ".test-home\.pi\agent"
+$env:H0X_CODING_AGENT_SESSION_DIR = Join-Path $repoRoot ".test-home\.pi\sessions"
 $env:XDG_CONFIG_HOME = Join-Path $repoRoot ".test-home\.config"
 
 $gitConfigDir = Join-Path $env:XDG_CONFIG_HOME "git"
@@ -24,6 +24,18 @@ New-Item -ItemType Directory -Force -Path `
 	| Out-Null
 if (-not (Test-Path -LiteralPath $gitIgnorePath)) {
 	New-Item -ItemType File -Path $gitIgnorePath | Out-Null
+}
+
+$sourcePiAgentDir = Join-Path $env:USERPROFILE ".pi\agent"
+if (Test-Path -LiteralPath $sourcePiAgentDir) {
+	foreach ($fileName in @("auth.json", "models.json", "settings.json")) {
+		$sourcePath = Join-Path $sourcePiAgentDir $fileName
+		$targetPath = Join-Path $env:H0X_CODING_AGENT_DIR $fileName
+		if ((Test-Path -LiteralPath $sourcePath) -and -not (Test-Path -LiteralPath $targetPath)) {
+			Copy-Item -LiteralPath $sourcePath -Destination $targetPath
+			Write-Host "Seeded workspace-local H-0x $fileName from existing Pi Code config."
+		}
+	}
 }
 
 $piTest = Join-Path $scriptDir "pi-test.ps1"

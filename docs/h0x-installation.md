@@ -89,3 +89,7 @@ h0x provider add openrouter --api-key <key> --model <model>
 ```
 
 See [H-0x Free Models And BYOK](./h0x-free-models-and-byok.md) for the token handling policy.
+
+## Local Test Launcher
+
+On Windows, `h0x-test.ps1` keeps runtime writes inside the repository under `.test-home`, `.test-tmp`, and `.npm-cache`. If existing Pi Code credentials are available in `%USERPROFILE%\.pi\agent`, the launcher seeds missing `auth.json`, `models.json`, and `settings.json` into the workspace-local H-0x agent directory so Pi-compatible free/default routes work without writing new runtime state to the C drive.
