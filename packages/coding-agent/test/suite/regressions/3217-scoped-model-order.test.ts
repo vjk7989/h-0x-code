@@ -1,6 +1,8 @@
+import type { Model } from "@earendil-works/pi-ai";
 import { setKeybindings, type TUI } from "@earendil-works/pi-tui";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KeybindingsManager } from "../../../src/core/keybindings.ts";
+import type { ModelRegistry } from "../../../src/core/model-registry.ts";
 import { ModelSelectorComponent } from "../../../src/modes/interactive/components/model-selector.ts";
 import { ScopedModelsSelectorComponent } from "../../../src/modes/interactive/components/scoped-models-selector.ts";
 import { initTheme } from "../../../src/modes/interactive/theme/theme.ts";
@@ -15,6 +17,21 @@ function createFakeTui(): TUI {
 
 async function waitForAsyncRender(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function createModel(provider: string, id: string): Model<"anthropic-messages"> {
+	return {
+		id,
+		name: id,
+		api: "anthropic-messages",
+		provider,
+		baseUrl: "https://example.test",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 8192,
+	};
 }
 
 describe("issue #3217 scoped model ordering", () => {
@@ -100,5 +117,47 @@ describe("issue #3217 scoped model ordering", () => {
 		});
 
 		expect(orderedIds).toEqual([modelTwo.id, modelOne.id, modelThree.id]);
+	});
+
+	it("lists free OpenRouter models first in the /model all tab", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-paid", name: "Paid", reasoning: false }],
+		});
+		harnesses.push(harness);
+
+		const paidModel = createModel("anthropic", "claude-opus-4-8");
+		const freeModel = createModel("openrouter", "qwen/qwen3-coder:free");
+		const modelRegistry = {
+			refresh: () => {},
+			getError: () => undefined,
+			getAvailable: () => [paidModel, freeModel],
+			find: (provider: string, id: string) =>
+				[paidModel, freeModel].find((model) => model.provider === provider && model.id === id),
+		} as unknown as ModelRegistry;
+
+		const selector = new ModelSelectorComponent(
+			createFakeTui(),
+			paidModel,
+			harness.settingsManager,
+			modelRegistry,
+			[],
+			() => {},
+			() => {},
+		);
+
+		await waitForAsyncRender();
+
+		const renderedLines = stripAnsi(selector.render(120).join("\n"))
+			.split("\n")
+			.filter((line) => line.includes("[openrouter]") || line.includes("[anthropic]"));
+		const orderedIds = renderedLines.slice(0, 2).map((line) => {
+			const [modelId] = line
+				.trim()
+				.replace(/^(?:→|â†’)\s*/, "")
+				.split(" [");
+			return modelId?.trim() ?? "";
+		});
+
+		expect(orderedIds).toEqual([freeModel.id, paidModel.id]);
 	});
 });

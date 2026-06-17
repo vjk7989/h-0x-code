@@ -75,6 +75,7 @@ import type {
 	ProjectTrustContext,
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
+import { loadH0xConfig } from "../../core/h0x-config.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
@@ -113,7 +114,8 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
-import { FooterComponent } from "./components/footer.ts";
+import { FooterComponent, formatCwdForFooter } from "./components/footer.ts";
+import { H0xHeader, type H0xStatusBadgeOptions } from "./components/h0x-shell.ts";
 import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
 import { ModelSelectorComponent } from "./components/model-selector.ts";
@@ -199,6 +201,31 @@ function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
 
 function isUnknownModel(model: Model<any> | undefined): boolean {
 	return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
+}
+
+function getConfiguredMcpServerCount(cwd: string): number {
+	try {
+		const config = loadH0xConfig({ cwd });
+		return Object.values(config.mcpServers).filter((server) => server.enabled !== false).length;
+	} catch {
+		return 0;
+	}
+}
+
+function getGithubStatus(cwd: string): "connected" | "disconnected" {
+	if (process.env.GITHUB_TOKEN || process.env.GH_TOKEN) {
+		return "connected";
+	}
+	try {
+		const config = loadH0xConfig({ cwd });
+		const githubServer = config.mcpServers.github;
+		if (githubServer?.enabled !== false && (githubServer?.env?.GITHUB_TOKEN || githubServer?.env?.GH_TOKEN)) {
+			return "connected";
+		}
+	} catch {
+		// Keep status conservative if config cannot be read.
+	}
+	return "disconnected";
 }
 
 function quoteIfNeeded(value: string): string {
@@ -675,12 +702,6 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo =
-				theme.bold(theme.fg("accent", APP_TITLE)) +
-				theme.fg("dim", ` (${APP_NAME}) v${this.version}`) +
-				(APP_TAGLINE ? `\n${theme.fg("muted", APP_TAGLINE)}` : "") +
-				(APP_CREDIT_LINE ? `\n${theme.fg("muted", APP_CREDIT_LINE)}` : "");
-
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
 
@@ -720,17 +741,41 @@ export class InteractiveMode {
 				"dim",
 				`${APP_TITLE} can explain its own features and look up its docs. Ask it how to use or extend ${APP_TITLE}.`,
 			);
-			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+			const cwd = formatCwdForFooter(this.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE);
+			const model = this.session.state.model;
+			const githubStatus = getGithubStatus(this.sessionManager.getCwd());
+			const mcpCount = getConfiguredMcpServerCount(this.sessionManager.getCwd());
+			const badges: H0xStatusBadgeOptions[] = [
+				{ label: "model", value: model?.id ?? "no-model", tone: model ? "accent" : "warning" },
+				{ label: "agent", value: "default", tone: "muted" },
+				{ label: "mcp", value: `${mcpCount} connected`, tone: mcpCount > 0 ? "success" : "muted" },
+				{ label: "github", value: githubStatus, tone: githubStatus === "connected" ? "success" : "muted" },
+				{
+					label: "state",
+					value: this.session.isStreaming ? "working" : "idle",
+					tone: this.session.isStreaming ? "accent" : "success",
+				},
+			];
+			const builtInHeader = new H0xHeader(
+				{
+					title: APP_TITLE,
+					appName: APP_NAME,
+					version: this.version,
+					subtitle: APP_CREDIT_LINE ?? APP_TAGLINE,
+					productLine: "AI coding agent for developers",
+					cwd,
+					badges,
+					compactHelp: "Type /help for available commands",
+					expandedHelp: `${expandedInstructions}\n${compactInstructions}\n${compactOnboarding}`,
+					onboarding,
+				},
 				this.getStartupExpansionState(),
-				1,
-				0,
 			);
+			this.builtInHeader = builtInHeader;
 
 			// Setup UI layout
 			this.headerContainer.addChild(new Spacer(1));
-			this.headerContainer.addChild(this.builtInHeader);
+			this.headerContainer.addChild(builtInHeader);
 			this.headerContainer.addChild(new Spacer(1));
 		} else {
 			// Minimal header when silenced
@@ -765,12 +810,11 @@ export class InteractiveMode {
 	 * Update terminal title with session name and cwd.
 	 */
 	private updateTerminalTitle(): void {
-		const cwdBasename = path.basename(this.sessionManager.getCwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`${APP_TITLE} - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`${APP_TITLE} - ${sessionName}`);
 		} else {
-			this.ui.terminal.setTitle(`${APP_TITLE} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(APP_TITLE);
 		}
 	}
 

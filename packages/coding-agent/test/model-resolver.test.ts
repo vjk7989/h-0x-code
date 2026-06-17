@@ -5,6 +5,8 @@ import {
 	findInitialModel,
 	parseModelPattern,
 	resolveCliModel,
+	selectPreferredInitialModel,
+	sortModelsForDisplay,
 } from "../src/core/model-resolver.ts";
 
 // Mock models for testing
@@ -64,6 +66,19 @@ const mockOpenRouterModels: Model<"anthropic-messages">[] = [
 ];
 
 const allModels = [...mockModels, ...mockOpenRouterModels];
+
+const mockOpenRouterFreeModel: Model<"anthropic-messages"> = {
+	id: "qwen/qwen3-coder:free",
+	name: "Qwen3 Coder Free",
+	api: "anthropic-messages",
+	provider: "openrouter",
+	baseUrl: "https://openrouter.ai/api/v1",
+	reasoning: false,
+	input: ["text"],
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	contextWindow: 128000,
+	maxTokens: 8192,
+};
 
 describe("parseModelPattern", () => {
 	describe("simple patterns without colons", () => {
@@ -536,6 +551,10 @@ describe("resolveCliModel", () => {
 });
 
 describe("default model selection", () => {
+	test("openrouter defaults to a free model", () => {
+		expect(defaultModelPerProvider.openrouter).toBe("qwen/qwen3-coder:free");
+	});
+
 	test("openai defaults track current models", () => {
 		expect(defaultModelPerProvider.openai).toBe("gpt-5.4");
 		expect(defaultModelPerProvider["openai-codex"]).toBe("gpt-5.5");
@@ -596,5 +615,32 @@ describe("default model selection", () => {
 
 		expect(result.model?.provider).toBe("vercel-ai-gateway");
 		expect(result.model?.id).toBe("anthropic/claude-opus-4-6");
+	});
+
+	test("free OpenRouter models sort before current non-free models", () => {
+		const sorted = sortModelsForDisplay([...mockModels, mockOpenRouterFreeModel], mockModels[0]);
+
+		expect(sorted[0]).toBe(mockOpenRouterFreeModel);
+		expect(sorted[1]).toBe(mockModels[0]);
+	});
+
+	test("preferred initial model uses OpenRouter free before paid provider defaults", () => {
+		const selected = selectPreferredInitialModel([...mockModels, mockOpenRouterFreeModel]);
+
+		expect(selected).toBe(mockOpenRouterFreeModel);
+	});
+
+	test("findInitialModel uses OpenRouter free when no saved default or scoped model is set", async () => {
+		const registry = {
+			getAvailable: () => [mockModels[0], mockOpenRouterFreeModel],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(mockOpenRouterFreeModel);
 	});
 });

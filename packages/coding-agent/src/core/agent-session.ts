@@ -282,6 +282,7 @@ export class AgentSession {
 	// Retry state
 	private _retryAbortController: AbortController | undefined = undefined;
 	private _retryAttempt = 0;
+	private _openRouterFreeFallbackAttempts = new Set<string>();
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -498,6 +499,13 @@ export class AgentSession {
 			}
 		}
 
+		if (this._shouldSuppressOpenRouterFreeFallbackErrorEvent(event)) {
+			if (event.type === "message_end") {
+				this._lastAssistantMessage = event.message;
+			}
+			return;
+		}
+
 		// Emit to extensions first
 		await this._emitExtensionEvent(event);
 
@@ -547,6 +555,24 @@ export class AgentSession {
 			}
 		}
 	};
+
+	private _shouldSuppressOpenRouterFreeFallbackErrorEvent(event: AgentEvent): event is Extract<
+		AgentEvent,
+		{ type: "message_start" | "message_update" | "message_end" }
+	> & {
+		message: AssistantMessage;
+	} {
+		if (event.type !== "message_start" && event.type !== "message_update" && event.type !== "message_end") {
+			return false;
+		}
+		if (event.message.role !== "assistant") {
+			return false;
+		}
+		if (!this._isOpenRouterTemporaryFreeLimit(event.message)) {
+			return false;
+		}
+		return this._getOpenRouterFreeFallbackCandidates().length > 0;
+	}
 
 	private _willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: "agent_end" }>): boolean {
 		const settings = this.settingsManager.getRetrySettings();
@@ -953,6 +979,10 @@ export class AgentSession {
 			return false;
 		}
 
+		if (await this._prepareOpenRouterFreeFallback(msg)) {
+			return true;
+		}
+
 		if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
 			return true;
 		}
@@ -1135,6 +1165,7 @@ export class AgentSession {
 		}
 
 		preflightResult?.(true);
+		this._openRouterFreeFallbackAttempts.clear();
 		await this._runAgentPrompt(messages);
 	}
 
@@ -1523,6 +1554,18 @@ export class AgentSession {
 		await this._emitModelSelect(nextModel, currentModel, "cycle");
 
 		return { model: nextModel, thinkingLevel: this.thinkingLevel, isScoped: false };
+	}
+
+	private async _switchModelForCurrentTurn(model: Model<any>, thinkingLevel?: ThinkingLevel): Promise<void> {
+		if (!this._modelRegistry.hasConfiguredAuth(model)) {
+			throw new Error(`No API key for ${model.provider}/${model.id}`);
+		}
+
+		const previousModel = this.model;
+		this.agent.state.model = model;
+		this.sessionManager.appendModelChange(model.provider, model.id);
+		this.setThinkingLevel(this._getThinkingLevelForModelSwitch(thinkingLevel));
+		await this._emitModelSelect(model, previousModel, "cycle");
 	}
 
 	// =========================================================================
@@ -2489,6 +2532,64 @@ export class AgentSession {
 		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
 			err,
 		);
+	}
+
+	private _isOpenRouterFreeModel(model: Model<any> | undefined): model is Model<any> {
+		return model?.provider === "openrouter" && model.id.endsWith(":free");
+	}
+
+	private _isOpenRouterTemporaryFreeLimit(message: AssistantMessage): boolean {
+		if (message.stopReason !== "error" || !message.errorMessage) return false;
+		if (!this._isOpenRouterFreeModel(this.model)) return false;
+
+		const err = message.errorMessage;
+		if (this._isNonRetryableProviderLimitError(err)) return false;
+		return /429|rate.?limit|temporar|upstream/i.test(err);
+	}
+
+	private _getOpenRouterFreeFallbackCandidates(): Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
+		const currentModel = this.model;
+		const source =
+			this._scopedModels.length > 0
+				? this._scopedModels
+				: this._modelRegistry.getAvailable().map((model) => ({ model }));
+
+		const candidates = source.filter(({ model }) => {
+			if (!this._isOpenRouterFreeModel(model)) return false;
+			if (modelsAreEqual(model, currentModel)) return false;
+			if (this._openRouterFreeFallbackAttempts.has(`${model.provider}/${model.id}`)) return false;
+			return this._modelRegistry.hasConfiguredAuth(model);
+		});
+
+		return candidates.sort((a, b) => {
+			const score = (model: Model<any>) =>
+				/coder|code|qwen|deepseek|glm|kimi|mistral|llama/i.test(model.id) ? 0 : 1;
+			return score(a.model) - score(b.model);
+		});
+	}
+
+	private async _prepareOpenRouterFreeFallback(message: AssistantMessage): Promise<boolean> {
+		if (!this._isOpenRouterTemporaryFreeLimit(message)) {
+			return false;
+		}
+
+		const currentModel = this.model;
+		if (currentModel) {
+			this._openRouterFreeFallbackAttempts.add(`${currentModel.provider}/${currentModel.id}`);
+		}
+
+		const next = this._getOpenRouterFreeFallbackCandidates()[0];
+		if (!next) {
+			return false;
+		}
+
+		const messages = this.agent.state.messages;
+		if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+			this.agent.state.messages = messages.slice(0, -1);
+		}
+
+		await this._switchModelForCurrentTurn(next.model, next.thinkingLevel);
+		return true;
 	}
 
 	/**

@@ -7,6 +7,7 @@ import { fuzzyFilter } from "@earendil-works/pi-tui";
 import chalk from "chalk";
 import { formatNoModelsAvailableMessage } from "../core/auth-guidance.ts";
 import type { ModelRegistry } from "../core/model-registry.ts";
+import { sortModelsForDisplay } from "../core/model-resolver.ts";
 
 /**
  * Format a number as human-readable (e.g., 200000 -> "200K", 1000000 -> "1M")
@@ -50,12 +51,7 @@ export async function listModels(modelRegistry: ModelRegistry, searchPattern?: s
 		return;
 	}
 
-	// Sort by provider, then by model id
-	filteredModels.sort((a, b) => {
-		const providerCmp = a.provider.localeCompare(b.provider);
-		if (providerCmp !== 0) return providerCmp;
-		return a.id.localeCompare(b.id);
-	});
+	filteredModels = sortModelsForDisplay(filteredModels);
 
 	// Calculate column widths
 	const rows = filteredModels.map((m) => ({
